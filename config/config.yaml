@@ -1,0 +1,65 @@
+# FootprintX configuration.
+# Secrets (API keys) do NOT belong here — put them in .env (see .env.example).
+
+project:
+  name: FootprintX
+
+execution:
+  automatic: true
+  concurrency: 10          # max modules / tool processes running at once
+  timeout: 30              # default network request timeout (seconds)
+  module_timeout: 1800     # hard cap per module run (seconds)
+  retries: 2
+  continue_on_error: true
+
+scope:
+  # Empty include = the targets given on the command line define the authorised scope.
+  # Entries may be domains (match the domain and its subdomains) or IPs / CIDRs.
+  include: []
+  exclude: []
+
+modules:
+  subdomains:
+    enabled: true
+  dns:
+    enabled: true
+    record_types: [A, AAAA, CNAME, MX, NS, TXT, SOA, PTR, CAA]
+  ip_discovery:
+    enabled: true
+  http_probe:
+    enabled: true
+  port_scanning:
+    enabled: true
+    top_ports: 1000
+  technology_detection:
+    enabled: true
+  web_fuzzing:
+    enabled: true
+    wordlist: wordlists/common.txt
+    extensions: [php, html, js, txt, bak, zip]
+    match_status: [200, 204, 301, 302, 307, 401, 403]
+    threads: 40
+  osint:
+    enabled: true
+  shodan:
+    enabled: true
+  proxy:
+    enabled: false
+    # From inside Docker, use http://host.docker.internal:8080 to reach Burp/ZAP on the host.
+    url: http://127.0.0.1:8080
+
+tools:
+  # Override where a tool binary is found, e.g.  httpx: /opt/tools/bin/httpx
+  paths: {}
+
+output:
+  directory: ./results
+  formats: [json, html, txt]
+
+safety:
+  require_authorization: true
+  respect_scope: true
+  max_requests_per_second: 10
+
+logging:
+  level: INFO
