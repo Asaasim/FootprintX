@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
-# Install the external tools for a local (non-Docker) Linux/macOS setup.
+# Install the external tools on a non-Kali Linux/macOS system (from source via Go).
+# On Kali use scripts/install_kali.sh instead — everything is in Kali's repos.
 # Requires Go 1.24+ and libpcap headers (apt install libpcap-dev) for naabu.
 # Docker users don't need this — the image builds all of these.
 set -eu
