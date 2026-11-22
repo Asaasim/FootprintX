@@ -25,3 +25,4 @@ docs
 .claude
 docker-compose.yml
 Dockerfile
+tests/e2e/.run

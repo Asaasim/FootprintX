@@ -1,0 +1,38 @@
+# FootprintX configuration used inside the E2E lab.
+execution:
+  concurrency: 10
+  timeout: 5
+  module_timeout: 900
+  retries: 1
+
+scope:
+  # The lab domain plus the two lab servers' addresses, listed explicitly so they
+  # may be scanned even though they are private. The "outsider" server
+  # (172.31.77.20 / outsider.test) is deliberately NOT in scope.
+  include: [lab.test, 172.31.77.10, 172.31.77.11]
+  exclude: []
+
+modules:
+  subdomains:
+    sources: [crtsh]          # no internet in the lab: must fail gracefully
+  osint:
+    harvester_timeout: 60
+  dns:
+    resolvers: [172.31.77.53]
+  port_scanning:
+    top_ports: 100
+  web_fuzzing:
+    wordlist: /app/wordlists/e2e.txt
+    threads: 10
+
+output:
+  directory: ./results
+  formats: [json, html, txt, csv]
+
+safety:
+  require_authorization: true
+  respect_scope: true
+  max_requests_per_second: 100
+
+logging:
+  level: INFO

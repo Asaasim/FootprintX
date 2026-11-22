@@ -1,0 +1,15 @@
+# lab.test is the authorised target; outsider.test is OUT of scope.
+lab.test:53 {
+    file /etc/coredns/lab.test.db
+    transfer {
+        to *
+    }
+    log
+}
+outsider.test:53 {
+    file /etc/coredns/outsider.test.db
+    log
+}
+.:53 {
+    log
+}

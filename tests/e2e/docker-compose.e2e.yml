@@ -1,0 +1,61 @@
+# Isolated E2E security lab for FootprintX. Driven by tests/e2e/test_e2e_lab.py:
+#
+#   FOOTPRINTX_E2E=1 pytest tests/e2e -v
+#
+# The network is `internal`: nothing in it can reach the internet, so every
+# "attack" stays inside the lab.
+
+name: footprintx-e2e
+
+networks:
+  lab:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.77.0/24
+
+services:
+  dns:
+    image: coredns/coredns:1.11.3
+    command: ["-conf", "/etc/coredns/Corefile"]
+    volumes:
+      - ./lab/dns:/etc/coredns:ro
+    networks:
+      lab: {ipv4_address: 172.31.77.53}
+
+  web:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./.run/site:/usr/share/nginx/html:ro
+      - ./lab/web/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      lab: {ipv4_address: 172.31.77.10}
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      lab: {ipv4_address: 172.31.77.11}
+
+  # OUT OF SCOPE. Its access log must stay empty for the whole test run.
+  outsider:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./lab/outsider:/usr/share/nginx/html:ro
+    networks:
+      lab: {ipv4_address: 172.31.77.20}
+
+  scanner:
+    image: footprintx:latest
+    profiles: [scan]
+    init: true
+    dns: [172.31.77.53]
+    cap_drop: [ALL]
+    cap_add: [NET_RAW]
+    environment:
+      SHODAN_API_KEY: "${E2E_FAKE_SHODAN_KEY:-e2e-fake-shodan-key-0123456789}"
+    volumes:
+      - ./.run/results:/app/results
+      - ./lab/config.yaml:/app/config/config.yaml:ro
+      - ./lab/wordlist.txt:/app/wordlists/e2e.txt:ro
+    networks:
+      lab: {ipv4_address: 172.31.77.100}

@@ -38,3 +38,6 @@ wordlists/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# E2E lab runtime files
+tests/e2e/.run/

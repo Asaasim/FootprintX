@@ -1,0 +1,8 @@
+.git/HEAD
+.env
+admin
+files
+backup.zip
+robots.txt
+go
+index.html
