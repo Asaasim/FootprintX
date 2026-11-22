@@ -23,7 +23,14 @@ from footprintx.integrations import INTEGRATION_REGISTRY
 from footprintx.integrations.ffuf import FfufIntegration
 from footprintx.integrations.gobuster import GobusterIntegration
 from footprintx.modules.base import BaseModule
-from footprintx.modules.common import base_url, live_urls, locate, missing_tool_note, skipped
+from footprintx.modules.common import (
+    active_proxy,
+    base_url,
+    live_urls,
+    locate,
+    missing_tool_note,
+    skipped,
+)
 from footprintx.modules.common import run_tool as run_external
 from footprintx.utils.helpers import safe_dirname
 from footprintx.utils.wordlists import resolve_wordlist
@@ -32,6 +39,8 @@ if TYPE_CHECKING:
     from footprintx.core.context import ScanContext
 
 DEFAULT_STATUS = [200, 204, 301, 302, 307, 401, 403]
+#: Read-only methods only: fuzzing must never modify the target (spec §13.10).
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 #: (path regex, title, severity, statuses that count). First match wins.
 SENSITIVE = [
@@ -113,11 +122,17 @@ class WebFuzzingModule(BaseModule):
         return result
 
     def _options(self, context: ScanContext) -> dict:
+        method = str(self.config.option("method", "GET")).upper()
+        if method not in SAFE_METHODS:
+            # Fuzzing with POST/PUT/DELETE could change data on the target (spec §13.10).
+            method = "GET"
         return {
             "threads": int(self.config.option("threads", 40)),
             "timeout": int(context.settings.execution.timeout),
             "match_status": list(self.config.option("match_status", DEFAULT_STATUS)),
             "extensions": list(self.config.option("extensions", [])),
+            "method": method,
+            "proxy": active_proxy(context),
         }
 
     async def _ffuf(self, tool: FfufIntegration, path: str, base: str, wordlist: str,

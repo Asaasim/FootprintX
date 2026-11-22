@@ -31,6 +31,7 @@ from footprintx.integrations import INTEGRATION_REGISTRY
 from footprintx.integrations.httpx import HttpxIntegration
 from footprintx.modules.base import BaseModule
 from footprintx.modules.common import (
+    active_proxy,
     locate,
     missing_tool_note,
     resolved_hostnames,
@@ -38,7 +39,7 @@ from footprintx.modules.common import (
     scan_ips,
     skipped,
 )
-from footprintx.utils.http import make_client
+from footprintx.utils.http import fetch_limited, make_client
 from footprintx.utils.ratelimit import RateLimiter
 from footprintx.utils.tls import fetch_certificate
 
@@ -71,6 +72,7 @@ class HttpProbeModule(BaseModule):
 
         probes: list[dict[str, Any]] = []
         source = self.name
+        proxy = active_proxy(context)
         tool = INTEGRATION_REGISTRY["httpx"]
         assert isinstance(tool, HttpxIntegration)
         path = locate(context, tool) if self.config.option("engine", "auto") != "native" else None
@@ -79,7 +81,7 @@ class HttpProbeModule(BaseModule):
             cmd = await run_tool(
                 context, tool, path,
                 tool.probe_args(str(input_file), threads=threads, rate=rate,
-                                timeout=int(timeout)),
+                                timeout=int(timeout), proxy=proxy),
                 "httpx.jsonl", timeout=settings.execution.module_timeout)
             probes = tool.parse_probes(cmd.stdout)
             source = tool.name
@@ -91,7 +93,7 @@ class HttpProbeModule(BaseModule):
             result.notes.append(missing_tool_note(tool) + " — used the built-in prober")
 
         if path is None:
-            probes = await self._native_probe(inputs, rate, threads, timeout)
+            probes = await self._native_probe(inputs, rate, threads, timeout, proxy)
             source = self.name
             context.save_raw("http_probe.json", json.dumps(probes, indent=2))
 
@@ -105,7 +107,8 @@ class HttpProbeModule(BaseModule):
     # -- probing ---------------------------------------------------------------
 
     async def _native_probe(self, inputs: list[str], rate: int, threads: int,
-                            timeout: float) -> list[dict[str, Any]]:
+                            timeout: float, proxy: str | None = None
+                            ) -> list[dict[str, Any]]:
         candidates: list[str] = []
         for item in inputs:
             if "://" in item:
@@ -116,17 +119,16 @@ class HttpProbeModule(BaseModule):
 
         limiter = RateLimiter(rate)
         semaphore = asyncio.Semaphore(threads)
-        async with make_client(timeout, follow_redirects=False) as client:
+        async with make_client(timeout, follow_redirects=False, proxy=proxy) as client:
             async def probe(url: str) -> dict[str, Any] | None:
                 async with semaphore:
                     await limiter.wait()
                     try:
-                        response = await client.get(url)
+                        response = await fetch_limited(client, url)
                     except (httpx.HTTPError, ValueError):
                         return None
                 parts = urlsplit(url)
-                body = response.text[:200_000]
-                match = _TITLE.search(body)
+                match = _TITLE.search(response.text[:200_000])
                 return {
                     "url": url.rstrip("/"),
                     "host": parts.hostname or "",
@@ -136,7 +138,7 @@ class HttpProbeModule(BaseModule):
                     "title": " ".join(html.unescape(match.group(1)).split())[:200]
                     if match else "",
                     "webserver": response.headers.get("server", ""),
-                    "content_length": len(response.content),
+                    "content_length": len(response.body),
                     "location": response.headers.get("location", ""),
                     "tech": [],
                     "ips": [],

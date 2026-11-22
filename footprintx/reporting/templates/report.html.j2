@@ -52,6 +52,8 @@
     summary { cursor:pointer; padding:6px 0; font-weight:600; }
     .success { color:var(--ok); } .failed { color:var(--high); } .skipped { color:var(--muted); }
     .empty { color:var(--muted); font-style:italic; }
+    .new { display:inline-block; padding:0 6px; border-radius:4px; font-size:11px; font-weight:700;
+           color:var(--bg); background:var(--accent); vertical-align:middle; }
   </style>
 </head>
 <body>
@@ -77,13 +79,34 @@
     <div class="card"><b>{{ s.observations.low + s.observations.info }}</b><span>low / informational</span></div>
   </div>
 
+  {% if report.changes %}
+  <h2>New since the last scan</h2>
+  <p class="hint">Compared with the scan of {{ report.changes.compared_with_started_at[:16]|replace("T", " ") }} UTC
+    ({{ report.changes.compared_with }}).</p>
+  {% if report.changes.new %}
+  <div class="wrap"><table>
+    <tr><th>What</th><th>Value</th><th>Related to</th></tr>
+    {% for n in report.changes.new[:300] %}
+    <tr>
+      <td>{{ n.kind.replace("_", " ") }}{% if n.severity %} <span class="sev {{ n.severity }}">{{ n.severity }}</span>{% endif %}</td>
+      <td><code>{{ n.value }}</code></td>
+      <td><code>{{ n.target or "" }}</code></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% if report.changes.new|length > 300 %}<p class="hint">… and {{ report.changes.new|length - 300 }} more (see report.json).</p>{% endif %}
+  {% else %}
+  <p class="empty">Nothing new — the attack surface looks the same as last time.</p>
+  {% endif %}
+  {% endif %}
+
   <h2>Things worth looking at</h2>
   <p class="hint">Potential security issues, most serious first. These are leads for manual
     verification, not confirmed vulnerabilities.</p>
   {% for o in report.observations %}
   <div class="obs">
     <span class="sev {{ o.data.severity }}">{{ o.data.severity }}</span>
-    <span class="title">{{ o.value }}</span>
+    <span class="title">{{ o.value }}</span>{% if o.new %} <span class="new">NEW</span>{% endif %}
     <div class="where">{{ o.target }}</div>
     {% if o.data.detail %}<div>{{ o.data.detail }}</div>{% endif %}
   </div>
@@ -155,7 +178,7 @@
       {% endif %}
       {% for f in items[:1000] %}
       <tr>
-        <td><code>{{ f.value }}</code>
+        <td><code>{{ f.value }}</code>{% if f.new %} <span class="new">NEW</span>{% endif %}
           {% if f.data.title %}<div class="hint">{{ f.data.title }}</div>{% endif %}
           {% if f.data.status %}<div class="hint">HTTP {{ f.data.status }}</div>{% endif %}
           {% if f.data.version %}<div class="hint">version {{ f.data.version }}</div>{% endif %}

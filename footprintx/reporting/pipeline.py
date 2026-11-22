@@ -6,6 +6,7 @@ from pathlib import Path
 
 from footprintx.core.context import ScanContext
 from footprintx.reporting.aggregator import aggregate, write_result_files
+from footprintx.reporting.csv_report import write_csv_report
 from footprintx.reporting.deduplicator import deduplicate
 from footprintx.reporting.html_report import write_html_report
 from footprintx.reporting.json_report import build_report_data, write_json_report
@@ -16,6 +17,7 @@ WRITERS = {
     "json": ("report.json", write_json_report),
     "txt": ("report.txt", write_text_report),
     "html": ("report.html", write_html_report),
+    "csv": ("findings.csv", write_csv_report),
 }
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Collection, Mapping
 from pathlib import Path
 
@@ -14,11 +15,13 @@ from footprintx.core.logger import attach_log_file, detach_log_file, get_logger
 from footprintx.core.models import ModuleResult, ModuleStatus, Target
 from footprintx.core.scheduler import ExecutionPlan, build_execution_plan
 from footprintx.core.scope_manager import ScopeManager
+from footprintx.database.history import previous_scan
 from footprintx.database.storage import HISTORY_DB, Storage
 from footprintx.modules import MODULE_REGISTRY
 from footprintx.modules.base import BaseModule
 from footprintx.reporting.pipeline import generate_reports
 from footprintx.utils.helpers import restore_ownership, safe_dirname, unique_session_dir, utc_now
+from footprintx.utils.sanitize import redact
 
 log = get_logger("orchestrator")
 
@@ -75,12 +78,21 @@ class Orchestrator:
         context = ScanContext(output_dir.name, output_dir, self.settings, scope, targets,
                               passive=passive)
 
+        try:
+            context.baseline = previous_scan(Storage(output_root / HISTORY_DB),
+                                             [t.value for t in targets], passive)
+        except Exception:  # noqa: BLE001 — change detection is a convenience, never fatal
+            log.exception("Could not read scan history")
+
         modules, skipped = self.select_modules(targets, exclude, passive)
         plan = build_execution_plan(modules)
         for name, reason in skipped.items():
             context.results[name] = ModuleResult(name, ModuleStatus.SKIPPED, skip_reason=reason)
 
-        context.raw_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True)
+        if os.name == "posix":
+            os.chmod(output_dir, 0o700)  # scan results are sensitive: owner-only access
+        context.raw_dir.mkdir(exist_ok=True)
         log_handler = attach_log_file(output_dir / "scan.log", self.settings.logging.level)
         log.info("Scan %s started: %s", context.session_id, ", ".join(t.value for t in targets))
         log.info("Plan: %s", " -> ".join(",".join(m.name for m in layer) for layer in plan))
@@ -130,4 +142,4 @@ class Orchestrator:
             "modules": {name: r.to_dict() for name, r in context.results.items()},
         }
         (context.output_dir / "scan_info.json").write_text(
-            json.dumps(info, indent=2), encoding="utf-8")
+            redact(json.dumps(info, indent=2)), encoding="utf-8")

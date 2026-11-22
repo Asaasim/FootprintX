@@ -8,8 +8,16 @@ from typing import Any
 
 from footprintx import __version__
 from footprintx.core.context import ScanContext
-from footprintx.core.models import SEVERITIES, Finding, FindingKind, ModuleStatus
+from footprintx.core.models import (
+    SEVERITIES,
+    TRACKED_KINDS,
+    Finding,
+    FindingKind,
+    ModuleStatus,
+    change_key,
+)
 from footprintx.reporting.correlator import correlate, count_hosts
+from footprintx.utils.sanitize import redact
 
 #: Order of finding sections in reports (observations are shown separately, first).
 SECTION_ORDER = [
@@ -21,15 +29,27 @@ SECTION_ORDER = [
 
 def build_report_data(context: ScanContext, findings: list[Finding]) -> dict[str, Any]:
     """Shared report model used by the JSON, text and HTML writers."""
+    baseline = context.baseline
+    new_items: list[dict[str, Any]] = []
+
+    def entry(f: Finding) -> dict[str, Any]:
+        item = f.to_dict()
+        if (baseline is not None and f.kind in TRACKED_KINDS
+                and change_key(f.kind.value, f.value, f.target) not in baseline.keys):
+            item["new"] = True
+            new_items.append({"kind": f.kind.value, "value": f.value, "target": f.target,
+                              "severity": f.data.get("severity")})
+        return item
+
     by_kind: dict[str, list[dict[str, Any]]] = {}
     for kind in SECTION_ORDER:
-        items = [f.to_dict() for f in findings if f.kind is kind]
+        items = [entry(f) for f in findings if f.kind is kind]
         if items:
             by_kind[kind.value] = items
 
     rank = {s: i for i, s in enumerate(SEVERITIES)}
     observations = sorted(
-        (f.to_dict() for f in findings if f.kind is FindingKind.OBSERVATION),
+        (entry(f) for f in findings if f.kind is FindingKind.OBSERVATION),
         key=lambda o: (rank.get(o["data"].get("severity", "info"), len(rank)), o["value"]))
     severity_counts = {s: sum(1 for o in observations if o["data"].get("severity") == s)
                        for s in SEVERITIES}
@@ -59,7 +79,13 @@ def build_report_data(context: ScanContext, findings: list[Finding]) -> dict[str
             "modules_succeeded": statuses[ModuleStatus.SUCCESS],
             "modules_failed": statuses[ModuleStatus.FAILED],
             "modules_skipped": statuses[ModuleStatus.SKIPPED],
+            "new_since_last_scan": len(new_items) if baseline else None,
         },
+        "changes": {
+            "compared_with": baseline.session_id,
+            "compared_with_started_at": baseline.started_at,
+            "new": new_items,
+        } if baseline else None,
         "observations": observations,
         "assets": assets,
         "modules": [r.to_dict() for r in context.results.values()],
@@ -68,5 +94,5 @@ def build_report_data(context: ScanContext, findings: list[Finding]) -> dict[str
 
 
 def write_json_report(data: dict[str, Any], path: Path) -> Path:
-    path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    path.write_text(redact(json.dumps(data, indent=2, default=str)), encoding="utf-8")
     return path

@@ -39,9 +39,12 @@ log = get_logger("modules.dns")
 
 FULL_RECORD_TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
 HOST_RECORD_TYPES = ("A", "AAAA")
-_EMPTY = (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers,
-          dns.resolver.YXDOMAIN, dns.exception.Timeout, dns.name.EmptyLabel,
-          dns.name.LabelTooLong)
+#: The name or record definitely does not exist.
+_EMPTY = (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.YXDOMAIN,
+          dns.name.EmptyLabel, dns.name.LabelTooLong)
+#: The lookup itself failed (timeout, SERVFAIL/REFUSED from every server): we don't
+#: know whether the record exists, so it must never be reported as "missing".
+_FAILED = (dns.exception.Timeout, dns.resolver.NoNameservers)
 
 
 class DnsModule(BaseModule):
@@ -50,6 +53,8 @@ class DnsModule(BaseModule):
     applies_to = HOSTNAME_TYPES | {TargetType.URL}
     depends_on = ("subdomains", "osint")
     integrations = ()
+    #: Lookups that timed out or were refused during the current run.
+    failed_lookups: int = 0
 
     async def run(self, context: ScanContext) -> ModuleResult:
         hosts = scan_hostnames(context)
@@ -57,7 +62,8 @@ class DnsModule(BaseModule):
             return skipped(self.name, "no hostnames to resolve")
 
         result = ModuleResult(self.name, ModuleStatus.SUCCESS)
-        self.resolver = self._make_resolver(context, float(context.settings.execution.timeout))
+        self.failed_lookups = 0
+        self.resolver =self._make_resolver(context, float(context.settings.execution.timeout))
         # Discovered subdomains can number in the tens of thousands (CT-log noise),
         # so they get a fast resolver and only A/AAAA lookups.
         self.bulk_resolver = self._make_resolver(context, 5.0)
@@ -68,6 +74,16 @@ class DnsModule(BaseModule):
         # Detect wildcard DNS first: names that only resolve to the wildcard address
         # are not real hosts and must not be probed, port-scanned or fuzzed.
         wildcards = {apex: await self._wildcard_ips(apex) for apex in apexes}
+
+        # Zone transfers first: any names they reveal are resolved with the rest.
+        if not context.passive:
+            for apex in apexes:
+                result.findings.extend(await self._check_axfr(apex, result, context))
+        known = set(hosts)
+        for f in result.findings:
+            if f.kind is FindingKind.SUBDOMAIN and f.value not in known:
+                hosts.append(f.value)
+                known.add(f.value)
 
         bulk = [h for h in hosts if h not in seeds]
         max_hosts = int(self.config.option("max_hosts", 10_000))
@@ -111,6 +127,12 @@ class DnsModule(BaseModule):
             result.findings.extend(
                 await self._domain_checks(apex, wildcards[apex], result, context))
 
+        if self.failed_lookups:
+            message = (f"{self.failed_lookups} DNS lookups timed out or were refused by the "
+                       "DNS server; results may be incomplete (set modules.dns.resolvers "
+                       "to use other DNS servers)")
+            result.notes.append(message)
+            log.warning("dns: %s", message)
         log.info("dns: %d records for %d hosts", len(result.findings), len(targets))
         return result
 
@@ -126,16 +148,27 @@ class DnsModule(BaseModule):
         resolver.timeout = min(2.5, lifetime)
         return resolver
 
-    async def _query(self, name: str, rtype: str,
-                     resolver: dns.asyncresolver.Resolver | None = None) -> list[tuple[str, int]]:
+    async def _lookup(self, name: str, rtype: str,
+                      resolver: dns.asyncresolver.Resolver | None = None
+                      ) -> list[tuple[str, int]] | None:
+        """Records for ``name``: ``[]`` if none exist, ``None`` if the lookup failed."""
         try:
             answer = await (resolver or self.resolver).resolve(name, rtype,
                                                                raise_on_no_answer=False)
         except _EMPTY:
             return []
+        except _FAILED as exc:
+            self.failed_lookups += 1
+            log.debug("dns: %s %s lookup failed: %s", name, rtype, exc)
+            return None
         if answer.rrset is None:
             return []
         return [(rdata.to_text(), answer.rrset.ttl) for rdata in answer]
+
+    async def _query(self, name: str, rtype: str,
+                     resolver: dns.asyncresolver.Resolver | None = None) -> list[tuple[str, int]]:
+        """Like :meth:`_lookup`, but a failed lookup simply yields no records."""
+        return await self._lookup(name, rtype, resolver) or []
 
     async def _wildcard_ips(self, domain: str) -> set[str]:
         """IPs that random, non-existent names under ``domain`` resolve to (empty = none)."""
@@ -164,32 +197,51 @@ class DnsModule(BaseModule):
         self, domain: str, wildcard: set[str], result: ModuleResult, context: ScanContext
     ) -> list[Finding]:
         found: list[Finding] = []
-        txt = [_unquote(v) for v, _ in await self._query(domain, "TXT")]
-        spf = [t for t in txt if t.lower().startswith("v=spf1")]
-        if not spf:
-            found.append(observation(
-                "No SPF record", domain, self.name, "low",
-                "Without SPF, anyone can send email that appears to come from this domain."))
-        elif any(t.replace(" ", "").endswith("+all") for t in spf):
-            found.append(observation(
-                "SPF allows all senders (+all)", domain, self.name, "medium",
-                f"SPF record ends with +all: {spf[0]}"))
+        unchecked: list[str] = []
 
-        dmarc = [_unquote(v) for v, _ in await self._query(f"_dmarc.{domain}", "TXT")]
-        dmarc = [d for d in dmarc if d.lower().startswith("v=dmarc1")]
-        if not dmarc:
-            found.append(observation(
-                "No DMARC record", domain, self.name, "low",
-                "No _dmarc TXT record: spoofed email is not rejected or reported."))
-        elif "p=none" in dmarc[0].replace(" ", "").lower():
-            found.append(observation(
-                "DMARC policy is 'none'", domain, self.name, "info",
-                f"DMARC only monitors, it does not block spoofing: {dmarc[0]}"))
+        txt_records = await self._lookup(domain, "TXT")
+        if txt_records is None:
+            unchecked.append("SPF")
+        else:
+            txt = [_unquote(v) for v, _ in txt_records]
+            spf = [t for t in txt if t.lower().startswith("v=spf1")]
+            if not spf:
+                found.append(observation(
+                    "No SPF record", domain, self.name, "low",
+                    "Without SPF, anyone can send email that appears to come from this "
+                    "domain."))
+            elif any(t.replace(" ", "").endswith("+all") for t in spf):
+                found.append(observation(
+                    "SPF allows all senders (+all)", domain, self.name, "medium",
+                    f"SPF record ends with +all: {spf[0]}"))
 
-        if not await self._query(domain, "CAA"):
+        dmarc_records = await self._lookup(f"_dmarc.{domain}", "TXT")
+        if dmarc_records is None:
+            unchecked.append("DMARC")
+        else:
+            dmarc = [_unquote(v) for v, _ in dmarc_records]
+            dmarc = [d for d in dmarc if d.lower().startswith("v=dmarc1")]
+            if not dmarc:
+                found.append(observation(
+                    "No DMARC record", domain, self.name, "low",
+                    "No _dmarc TXT record: spoofed email is not rejected or reported."))
+            elif "p=none" in dmarc[0].replace(" ", "").lower():
+                found.append(observation(
+                    "DMARC policy is 'none'", domain, self.name, "info",
+                    f"DMARC only monitors, it does not block spoofing: {dmarc[0]}"))
+
+        caa_records = await self._lookup(domain, "CAA")
+        if caa_records is None:
+            unchecked.append("CAA")
+        elif not caa_records:
             found.append(observation(
                 "No CAA record", domain, self.name, "info",
                 "Any certificate authority may issue certificates for this domain."))
+
+        if unchecked:
+            result.notes.append(
+                f"{', '.join(unchecked)} of {domain} could not be checked: the DNS lookup "
+                "timed out or failed")
 
         if wildcard:
             found.append(observation(
@@ -197,8 +249,6 @@ class DnsModule(BaseModule):
                 f"Random subdomains resolve to {', '.join(sorted(wildcard))}; names that "
                 "only resolve to these addresses were ignored."))
 
-        if not context.passive:
-            found.extend(await self._check_axfr(domain, result, context))
         return found
 
     async def _check_axfr(

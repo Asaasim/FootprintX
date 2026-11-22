@@ -46,14 +46,38 @@ def test_input_helpers_respect_scope_and_dns(tmp_path):
     assert common.scan_hostnames(ctx) == ["example.com", "app.example.com", "gone.example.com"]
 
     add_result(ctx, "dns",
-               Finding(FindingKind.IP_ADDRESS, "192.0.2.10", "dns", "app.example.com",
+               Finding(FindingKind.IP_ADDRESS, "93.184.215.10", "dns", "app.example.com",
                        {"hostnames": ["app.example.com"]}),
-               Finding(FindingKind.IP_ADDRESS, "192.0.2.1", "dns", "example.com",
+               Finding(FindingKind.IP_ADDRESS, "93.184.215.1", "dns", "example.com",
                        {"hostnames": ["example.com"]}))
     assert common.resolved_hostnames(ctx) == ["example.com", "app.example.com"]
     # IPs resolved from hostnames are not port-scanned directly (could be a CDN)
     assert common.scan_ips(ctx) == []
-    assert sorted(common.all_known_ips(ctx)) == ["192.0.2.1", "192.0.2.10"]
+    assert sorted(common.all_known_ips(ctx)) == ["93.184.215.1", "93.184.215.10"]
+
+
+def test_names_pointing_at_internal_addresses_are_not_scanned(tmp_path):
+    """SSRF-style guard: an in-scope *name* must not steer active scans at the scanner's
+    own loopback, the cloud metadata service, or (by default) internal networks."""
+    ctx = make_context(tmp_path)
+    hosts = {"www.example.com": "93.184.215.14", "local.example.com": "127.0.0.1",
+             "meta.example.com": "169.254.169.254", "intranet.example.com": "10.1.2.3"}
+    add_result(ctx, "subdomains", *(Finding(FindingKind.SUBDOMAIN, h, "t") for h in hosts))
+    add_result(ctx, "dns", *(Finding(FindingKind.IP_ADDRESS, ip, "dns", h, {"hostnames": [h]})
+                             for h, ip in hosts.items()))
+    assert common.internal_hosts(ctx) == {"local.example.com": "local",
+                                          "meta.example.com": "local",
+                                          "intranet.example.com": "internal"}
+    assert common.resolved_hostnames(ctx) == ["www.example.com"]
+
+    # --allow-internal lets internal (never local) addresses through
+    ctx.settings.safety.allow_internal_targets = True
+    assert common.resolved_hostnames(ctx) == ["www.example.com", "intranet.example.com"]
+
+    # an address the user explicitly put in scope is always allowed
+    ctx.settings.safety.allow_internal_targets = False
+    ctx.scope = ScopeManager(["example.com", "10.0.0.0/8"])
+    assert "intranet.example.com" in common.resolved_hostnames(ctx)
 
 
 def test_live_urls_falls_back_to_seed_urls(tmp_path):

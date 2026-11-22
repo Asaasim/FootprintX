@@ -12,6 +12,7 @@ from footprintx.core.models import ModuleResult, ModuleStatus
 from footprintx.core.scheduler import ExecutionPlan
 from footprintx.modules.base import BaseModule
 from footprintx.utils.helpers import utc_now
+from footprintx.utils.sanitize import clean, clean_text, safe
 
 log = get_logger("engine")
 
@@ -85,6 +86,17 @@ class ExecutionEngine:
         self._record(context, result)
 
     def _record(self, context: ScanContext, result: ModuleResult) -> None:
+        # Everything below came from systems we don't control: strip terminal control
+        # characters, and mask secrets that may be echoed back in error messages.
+        result.errors = [safe(e) for e in result.errors]
+        result.notes = [safe(n) for n in result.notes]
+        if result.skip_reason:
+            result.skip_reason = safe(result.skip_reason)
+        for finding in result.findings:
+            finding.value = clean_text(finding.value)
+            if finding.target:
+                finding.target = clean_text(finding.target)
+            finding.data = clean(finding.data)
         context.results[result.module] = result
         if self.on_result is not None:
             self.on_result(result)

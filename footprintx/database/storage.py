@@ -26,6 +26,9 @@ class Storage:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.executescript(SCHEMA)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(scans)")}
+        if "mode" not in columns:  # databases created by schema v1
+            conn.execute("ALTER TABLE scans ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'")
         return conn
 
     def save_scan(self, context: ScanContext) -> None:
@@ -33,11 +36,12 @@ class Storage:
         with self.connect() as conn:
             conn.execute("DELETE FROM scans WHERE id = ?", (context.session_id,))
             conn.execute(
-                "INSERT INTO scans (id, started_at, finished_at, status, output_dir) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO scans (id, started_at, finished_at, status, output_dir, mode) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (context.session_id, context.started_at.isoformat(),
                  context.finished_at.isoformat() if context.finished_at else None,
-                 context.status, str(context.output_dir.resolve())))
+                 context.status, str(context.output_dir.resolve()),
+                 "passive" if context.passive else "full"))
             conn.executemany(
                 "INSERT OR IGNORE INTO scan_targets (scan_id, value, type) VALUES (?, ?, ?)",
                 [(context.session_id, t.value, t.type.value) for t in context.targets])

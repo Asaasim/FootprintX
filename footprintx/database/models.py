@@ -1,6 +1,6 @@
 """Database schema."""
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scans (
@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS scans (
     started_at   TEXT NOT NULL,
     finished_at  TEXT,
     status       TEXT NOT NULL,
-    output_dir   TEXT NOT NULL
+    output_dir   TEXT NOT NULL,
+    mode         TEXT NOT NULL DEFAULT 'full'   -- full | passive (added in v2)
 );
 
 CREATE TABLE IF NOT EXISTS scan_targets (

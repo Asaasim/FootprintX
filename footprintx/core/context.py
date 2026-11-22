@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from footprintx.core.config import Settings
-from footprintx.core.models import Finding, FindingKind, ModuleResult, Target
+from footprintx.core.models import Baseline, Finding, FindingKind, ModuleResult, Target
 from footprintx.core.scope_manager import ScopeManager
 from footprintx.utils.helpers import utc_now
 
@@ -22,6 +22,8 @@ class ScanContext:
     results: dict[str, ModuleResult] = field(default_factory=dict)
     #: Passive mode: only public sources, no traffic to the targets themselves.
     passive: bool = False
+    #: Previous completed scan of the same targets, for "new since last scan".
+    baseline: Baseline | None = None
     status: str = "pending"
     started_at: datetime = field(default_factory=utc_now)
     finished_at: datetime | None = None

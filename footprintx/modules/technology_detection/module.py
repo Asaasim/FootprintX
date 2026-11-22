@@ -26,6 +26,7 @@ from footprintx.integrations import INTEGRATION_REGISTRY
 from footprintx.integrations.whatweb import WhatWebIntegration
 from footprintx.modules.base import BaseModule
 from footprintx.modules.common import (
+    active_proxy,
     fetch_in_scope,
     live_urls,
     locate,
@@ -68,7 +69,8 @@ class TechnologyDetectionModule(BaseModule):
             input_file = context.save_raw("whatweb_input.txt", "\n".join(urls) + "\n")
             json_out = context.raw_dir / "whatweb.json"
             cmd = await run_tool(context, whatweb, path,
-                                 whatweb.scan_args(str(input_file), str(json_out)),
+                                 whatweb.scan_args(str(input_file), str(json_out),
+                                                   proxy=active_proxy(context)),
                                  "whatweb_stdout.txt",
                                  timeout=context.settings.execution.module_timeout)
             text = json_out.read_text(encoding="utf-8", errors="replace") \
@@ -87,7 +89,8 @@ class TechnologyDetectionModule(BaseModule):
         semaphore = asyncio.Semaphore(10)
         findings: list[Finding] = []
 
-        async with make_client(settings.execution.timeout, follow_redirects=False) as client:
+        async with make_client(settings.execution.timeout, follow_redirects=False,
+                               proxy=active_proxy(context)) as client:
             async def inspect(url: str) -> None:
                 async with semaphore:
                     await limiter.wait()

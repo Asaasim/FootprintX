@@ -8,8 +8,6 @@ from __future__ import annotations
 import ipaddress
 from typing import TYPE_CHECKING
 
-import httpx
-
 from footprintx.core.models import (
     HOSTNAME_TYPES,
     IP_TYPES,
@@ -20,7 +18,7 @@ from footprintx.core.models import (
     observation,
 )
 from footprintx.integrations import INTEGRATION_REGISTRY
-from footprintx.integrations.shodan import ShodanAuthError, ShodanIntegration
+from footprintx.integrations.shodan import ShodanAuthError, ShodanError, ShodanIntegration
 from footprintx.modules.base import BaseModule
 from footprintx.modules.common import all_known_ips, skipped
 from footprintx.utils.http import make_client
@@ -54,27 +52,34 @@ class ShodanModule(BaseModule):
 
         # Free Shodan accounts allow about one request per second.
         limiter = RateLimiter(float(self.config.option("rate", 1)))
-        indexed = 0
+        indexed = failures_in_a_row = answered = 0
+        retries = context.settings.execution.retries
         async with make_client(max(float(context.settings.execution.timeout), 20.0),
                                verify=True) as client:
             for ip in ips:
                 await limiter.wait()
                 try:
-                    data = await shodan.host(client, ip)
+                    data = await shodan.host(client, ip, retries=retries)
                 except ShodanAuthError as exc:
                     result.status = ModuleStatus.FAILED
                     result.errors.append(str(exc))
                     return result
-                except (httpx.HTTPError, RuntimeError, ValueError) as exc:
-                    result.errors.append(f"{ip}: {(str(exc).splitlines() or ['error'])[0]}")
+                except ShodanError as exc:
+                    result.errors.append(f"{ip}: {exc}")
+                    failures_in_a_row += 1
+                    if failures_in_a_row >= 3:
+                        result.errors.append("Shodan keeps failing; remaining lookups skipped")
+                        break
                     continue
+                failures_in_a_row = 0
+                answered += 1
                 if data is None:
                     continue
                 indexed += 1
                 result.findings.extend(self._findings(ip, shodan.summarise(data)))
 
         result.notes.append(f"{indexed} of {len(ips)} IPs are indexed by Shodan")
-        if result.errors and indexed == 0 and len(result.errors) == len(ips):
+        if result.errors and answered == 0:
             result.status = ModuleStatus.FAILED
         return result
 

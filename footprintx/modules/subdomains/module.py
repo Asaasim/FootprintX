@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 log = get_logger("modules.subdomains")
 
-DEFAULT_SOURCES = ("subfinder", "assetfinder", "crtsh")
+DEFAULT_SOURCES = ("subfinder", "assetfinder", "findomain", "crtsh")
 DEFAULT_SOURCE_TIMEOUT = 600.0
 
 
@@ -37,7 +37,7 @@ class SubdomainModule(BaseModule):
     description = "Discover subdomains via passive sources and certificate transparency."
     applies_to = frozenset({TargetType.DOMAIN})
     depends_on = ()
-    integrations = ("subfinder", "assetfinder", "amass", "crtsh")
+    integrations = ("subfinder", "assetfinder", "findomain", "amass", "crtsh")
 
     async def run(self, context: ScanContext) -> ModuleResult:
         result = ModuleResult(self.name)

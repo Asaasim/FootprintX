@@ -23,11 +23,18 @@ from footprintx.core.models import (
     ModuleResult,
     ModuleStatus,
     TargetType,
+    observation,
 )
 from footprintx.integrations import INTEGRATION_REGISTRY
 from footprintx.integrations.nmap import NmapIntegration
 from footprintx.modules.base import BaseModule
-from footprintx.modules.common import locate, missing_tool_note, run_tool
+from footprintx.modules.common import (
+    host_addresses,
+    internal_hosts,
+    locate,
+    missing_tool_note,
+    run_tool,
+)
 from footprintx.utils.helpers import safe_dirname
 
 if TYPE_CHECKING:
@@ -82,7 +89,39 @@ class IpDiscoveryModule(BaseModule):
                 if key in entry:
                     data[key] = entry[key]
             result.findings.append(Finding(FindingKind.IP_ADDRESS, ip, self.name, None, data))
+
+        self._report_internal_names(context, result)
         return result
+
+    def _report_internal_names(self, context: ScanContext, result: ModuleResult) -> None:
+        """Names that only point at internal/local addresses: reported, not scanned."""
+        # ``internal_hosts`` reads findings from finished modules; this module's own
+        # findings aren't recorded yet, so the DNS data it uses is complete already.
+        blocked = internal_hosts(context)
+        if not blocked:
+            return
+        addresses = host_addresses(context)
+        for host, risk in sorted(blocked.items()):
+            ips = ", ".join(sorted(addresses.get(host, ())))
+            if risk == "local":
+                result.findings.append(observation(
+                    "Hostname points to a loopback or link-local address", host, self.name,
+                    "low", f"{host} resolves to {ips}. Not scanned: probing it would hit "
+                    "the scanning machine or its cloud metadata service, not the target."))
+            else:
+                result.findings.append(observation(
+                    "Public DNS reveals an internal address", host, self.name, "low",
+                    f"{host} resolves to the internal address {ips}, disclosing details "
+                    "of the internal network."))
+        internal = sum(1 for r in blocked.values() if r == "internal")
+        if internal:
+            result.notes.append(
+                f"{internal} host(s) resolve only to internal addresses and were not actively "
+                "scanned — use --allow-internal if they are part of the authorised test")
+        local = len(blocked) - internal
+        if local:
+            result.notes.append(f"{local} host(s) resolve to loopback/link-local addresses "
+                                "and are never scanned")
 
     async def _expand_range(self, cidr: str, context: ScanContext, result: ModuleResult,
                             add) -> None:

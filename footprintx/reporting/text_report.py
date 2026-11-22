@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from footprintx.utils.sanitize import redact
+
 _RULE = "-" * 60
 
 
@@ -25,6 +27,15 @@ def render_text_report(data: dict[str, Any]) -> str:
         f"Observations: {obs['high']} high, {obs['medium']} medium, "
         f"{obs['low']} low, {obs['info']} info",
     ]
+
+    changes = data.get("changes")
+    if changes:
+        lines += ["", f"New since the last scan ({changes['compared_with']})", _RULE]
+        for item in changes["new"][:300]:
+            target = f"  <- {item['target']}" if item.get("target") else ""
+            lines.append(f"  + [{item['kind']}] {item['value']}{target}")
+        if not changes["new"]:
+            lines.append("  nothing new")
 
     if data["observations"]:
         lines += ["", "Security observations", _RULE]
@@ -83,7 +94,7 @@ def render_text_report(data: dict[str, Any]) -> str:
 
 
 def write_text_report(data: dict[str, Any], path: Path) -> Path:
-    path.write_text(render_text_report(data), encoding="utf-8")
+    path.write_text(redact(render_text_report(data)), encoding="utf-8")
     return path
 
 

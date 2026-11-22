@@ -103,6 +103,28 @@ class Finding:
         }
 
 
+#: Kinds compared between scans to report newly discovered assets (spec §5.1).
+TRACKED_KINDS = frozenset({
+    FindingKind.SUBDOMAIN, FindingKind.LIVE_HOST, FindingKind.URL, FindingKind.OPEN_PORT,
+    FindingKind.ENDPOINT, FindingKind.OBSERVATION,
+})
+
+
+def change_key(kind: str, value: str, target: str | None) -> str:
+    """Identity of a finding when comparing scans (observations are per target)."""
+    scoped = kind == FindingKind.OBSERVATION.value
+    return f"{kind}|{value.lower()}|{(target or '').lower() if scoped else ''}"
+
+
+@dataclass(frozen=True, slots=True)
+class Baseline:
+    """The previous completed scan of the same targets."""
+
+    session_id: str
+    started_at: str
+    keys: frozenset[str]
+
+
 class ModuleStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"

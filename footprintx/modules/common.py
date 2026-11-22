@@ -16,6 +16,7 @@ import httpx
 from footprintx.core.models import FindingKind, ModuleResult, ModuleStatus, TargetType
 from footprintx.core.process_manager import CommandResult, run_command
 from footprintx.integrations.base import ToolIntegration
+from footprintx.utils.http import Page, fetch_limited
 
 if TYPE_CHECKING:
     from footprintx.core.context import ScanContext
@@ -42,16 +43,62 @@ def scan_hostnames(context: ScanContext) -> list[str]:
     return [h for h in hosts if context.scope.is_in_scope(h)]
 
 
+def host_addresses(context: ScanContext) -> dict[str, set[str]]:
+    """hostname → every IP address it resolved to."""
+    mapping: dict[str, set[str]] = {}
+    for f in context.findings(FindingKind.IP_ADDRESS):
+        for host in {*(f.data.get("hostnames") or []), *([f.target] if f.target else [])}:
+            if not _is_ip(host):
+                mapping.setdefault(host, set()).add(f.value)
+    return mapping
+
+
+def address_risk(ip: str) -> str | None:
+    """Why an address must not be probed because a *name* pointed at it, or None.
+
+    - "local": loopback, link-local (incl. the 169.254.169.254 cloud metadata
+      service), unspecified or multicast — probing these hits the scanning machine
+      or its environment, never the target.
+    - "internal": any other non-public address (RFC 1918, CGNAT, reserved).
+    """
+    addr = ipaddress.ip_address(ip)
+    if addr.is_loopback or addr.is_link_local or addr.is_unspecified or addr.is_multicast:
+        return "local"
+    if not addr.is_global:
+        return "internal"
+    return None
+
+
+def internal_hosts(context: ScanContext) -> dict[str, str]:
+    """Hostnames that resolve only to local/internal addresses and are therefore not
+    actively scanned, with the reason. Addresses explicitly in the scope (an IP or
+    range target, or ``scope.include``) are always allowed; internal (not local)
+    addresses are allowed with ``safety.allow_internal_targets``."""
+    allow_internal = context.settings.safety.allow_internal_targets
+    blocked: dict[str, str] = {}
+    for host, ips in host_addresses(context).items():
+        risks = []
+        for ip in ips:
+            risk = address_risk(ip)
+            allowed = (risk is None
+                       or context.scope.explicitly_includes(ip)
+                       or (risk == "internal" and allow_internal))
+            risks.append(None if allowed else risk)
+        if risks and all(risks):
+            blocked[host] = "local" if "local" in risks else "internal"
+    return blocked
+
+
 def resolved_hostnames(context: ScanContext) -> list[str]:
-    """Hostnames that resolved in DNS — or all hostnames if DNS enumeration didn't run."""
+    """Hostnames that resolved in DNS (or all hostnames if DNS enumeration didn't
+    run), minus those that only point at local/internal addresses."""
     hosts = scan_hostnames(context)
     dns = context.results.get("dns")
-    if dns is None or not dns.findings:
-        return hosts
-    resolved = {f.target for f in context.findings(FindingKind.IP_ADDRESS) if f.target}
-    resolved |= {h for f in context.findings(FindingKind.IP_ADDRESS)
-                 for h in f.data.get("hostnames", [])}
-    return [h for h in hosts if h in resolved]
+    if dns is not None and dns.findings:
+        resolved = host_addresses(context)
+        hosts = [h for h in hosts if h in resolved]
+    blocked = internal_hosts(context)
+    return [h for h in hosts if h not in blocked]
 
 
 def scan_ips(context: ScanContext) -> list[str]:
@@ -94,21 +141,27 @@ def live_urls(context: ScanContext) -> list[str]:
 
 async def fetch_in_scope(
     client: httpx.AsyncClient, url: str, scope: ScopeManager, max_redirects: int = 3
-) -> httpx.Response:
-    """GET ``url``, following redirects only while they stay inside the scope.
-
-    ``client`` must be created with ``follow_redirects=False``.
-    """
-    response = await client.get(url)
+) -> Page:
+    """GET ``url`` (body size-limited), following redirects only while they stay
+    inside the scope. ``client`` must be created with ``follow_redirects=False``."""
+    page = await fetch_limited(client, url)
     for _ in range(max_redirects):
-        location = response.headers.get("location")
-        if not response.is_redirect or not location:
+        if not page.is_redirect:
             break
-        next_url = str(response.url.join(location))
+        next_url = str(page.url.join(page.headers["location"]))
         if not scope.is_in_scope(next_url):
             break
-        response = await client.get(next_url)
-    return response
+        page = await fetch_limited(client, next_url)
+    return page
+
+
+def active_proxy(context: ScanContext) -> str | None:
+    """Proxy URL for active HTTP traffic when ``modules.proxy.route_traffic`` is on
+    (spec §5.10: route requests through Burp Suite / ZAP for inspection)."""
+    config = context.settings.module_config("proxy", enabled_by_default=False)
+    if config.enabled and config.option("route_traffic", False):
+        return str(config.option("url", "http://127.0.0.1:8080"))
+    return None
 
 
 def base_url(url: str) -> str:

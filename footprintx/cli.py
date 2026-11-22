@@ -18,6 +18,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.status import Status
@@ -25,20 +26,44 @@ from rich.table import Table
 from rich.text import Text
 
 from footprintx import __version__
-from footprintx.core.config import ConfigError, Settings, load_settings
+from footprintx.core.config import ConfigError, ModuleConfig, Settings, load_settings
 from footprintx.core.context import ScanContext
 from footprintx.core.logger import setup_logging
-from footprintx.core.models import FindingKind, ModuleResult, ModuleStatus, Target
+from footprintx.core.models import (
+    TRACKED_KINDS,
+    FindingKind,
+    ModuleResult,
+    ModuleStatus,
+    Target,
+    change_key,
+)
 from footprintx.core.orchestrator import Orchestrator
 from footprintx.core.scheduler import ExecutionPlan
 from footprintx.core.scope_manager import ScopeManager
-from footprintx.core.target_parser import TargetParser
+from footprintx.core.target_parser import InvalidTargetError, TargetParser
 from footprintx.database.history import list_scans
 from footprintx.database.storage import HISTORY_DB, Storage
 from footprintx.modules import MODULE_REGISTRY
 from footprintx.reporting.correlator import correlate, count_hosts
 from footprintx.utils.dependency_checker import run_doctor
 
+def _use_utf8_output() -> None:
+    """Make stdout/stderr UTF-8 so progress marks (✔ ✘) and box characters never crash.
+
+    On Windows, output redirected to a file or pipe uses the ANSI code page
+    (e.g. cp1252), which cannot encode them; real consoles are already UTF-8.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+        if stream is None or encoding == "utf8" or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
+_use_utf8_output()
 console = Console()
 err_console = Console(stderr=True)
 
@@ -103,7 +128,7 @@ def _settings(ctx: typer.Context) -> Settings:
     try:
         return load_settings(ctx.obj["config_path"])
     except ConfigError as exc:
-        err_console.print(f"[red]Configuration error:[/] {exc}")
+        err_console.print(f"[red]Configuration error:[/] {escape(str(exc))}")
         raise typer.Exit(2) from exc
 
 
@@ -147,7 +172,8 @@ def guided(ctx: typer.Context) -> None:
         raw = TargetParser.read_file(file) if file.is_file() else re.split(r"[,\s]+", answer)
         targets, invalid = parser.parse_many(raw)
         for value, reason in invalid:
-            console.print(f"   [yellow]'{value}' was not understood: {reason}[/]")
+            console.print(f"   [yellow]'{escape(value)}' was not understood: "
+                          f"{escape(reason)}[/]")
         if targets:
             break
         console.print("   [yellow]Please try again.[/]")
@@ -216,6 +242,23 @@ def scan(
     passive: Annotated[
         bool, typer.Option("--passive", help="Public sources only; don't contact the targets.")
     ] = False,
+    scope: Annotated[
+        list[str] | None,
+        typer.Option("--scope", "-s",
+                     help="Authorised scope: domain, IP or CIDR, or a file with one per line. "
+                          "Repeatable. Default: the targets themselves."),
+    ] = None,
+    wordlist: Annotated[
+        Path | None,
+        typer.Option("--wordlist", "-w", exists=True, dir_okay=False, readable=True,
+                     help="Wordlist for directory/file discovery."),
+    ] = None,
+    allow_internal: Annotated[
+        bool,
+        typer.Option("--allow-internal",
+                     help="Also actively scan names that resolve to private/internal "
+                          "addresses (internal tests)."),
+    ] = False,
     yes: Annotated[
         bool,
         typer.Option("--yes", "-y", help="Confirm you are authorised to scan these targets."),
@@ -229,6 +272,7 @@ def scan(
     settings = _settings(ctx)
     setup_logging("DEBUG" if verbose else "ERROR")
     excluded = _parse_exclude(exclude)
+    _apply_overrides(settings, scope, wordlist, allow_internal)
 
     raw = list(target or [])
     if target_list is not None:
@@ -238,13 +282,15 @@ def scan(
 
     targets, invalid = TargetParser().parse_many(raw)
     for value, reason in invalid:
-        err_console.print(f"[yellow]\\[!][/] Skipping invalid target {value!r}: {reason}")
+        err_console.print(f"[yellow]\\[!][/] Skipping invalid target {escape(repr(value))}: "
+                          f"{escape(reason)}")
     if not targets:
         err_console.print("[red]No valid targets to scan.[/]")
         raise typer.Exit(1)
 
     output_root = output or settings.output.directory
     if dry_run:
+        targets, _ = _apply_scope(settings, targets)
         _print_plan(targets, Orchestrator(settings).plan(targets, excluded, passive), output_root)
         return
 
@@ -254,17 +300,43 @@ def scan(
         raise typer.Exit(1)
 
 
+def _apply_overrides(settings: Settings, scope: list[str] | None, wordlist: Path | None,
+                     allow_internal: bool) -> None:
+    """Fold command-line options into the loaded settings."""
+    for entry in scope or []:
+        path = Path(entry).expanduser()
+        entries = TargetParser.read_file(path) if path.is_file() else [entry]
+        for item in entries:
+            try:
+                TargetParser().parse(item)
+            except InvalidTargetError as exc:
+                raise typer.BadParameter(f"{item!r}: {exc}", param_hint="'--scope'") from None
+            settings.scope.include.append(item)
+    if wordlist is not None:
+        current = settings.module_config("web_fuzzing")
+        settings.modules["web_fuzzing"] = ModuleConfig(
+            **{**current.model_dump(), "wordlist": str(wordlist.resolve())})
+    if allow_internal:
+        settings.safety.allow_internal_targets = True
+
+
+def _apply_scope(settings: Settings, targets: list[Target]
+                 ) -> tuple[list[Target], ScopeManager]:
+    """Drop (and report) targets outside the authorised scope."""
+    if not settings.safety.respect_scope:
+        return targets, ScopeManager.allow_all(settings.scope.exclude)
+    scope = ScopeManager.from_settings(settings.scope, targets)
+    for t in targets:
+        if not scope.is_in_scope(t.value):
+            err_console.print("[yellow]\\[!][/] Skipping out-of-scope target "
+                              + escape(repr(t.value)))
+    return [t for t in targets if scope.is_in_scope(t.value)], scope
+
+
 def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
               excluded: set[str], passive: bool) -> ScanContext | None:
     """Scope-check, run with live progress, and print a summary. Shared by both modes."""
-    if settings.safety.respect_scope:
-        scope = ScopeManager.from_settings(settings.scope, targets)
-        for t in targets:
-            if not scope.is_in_scope(t.value):
-                err_console.print(f"[yellow]\\[!][/] Skipping out-of-scope target {t.value!r}")
-        targets = [t for t in targets if scope.is_in_scope(t.value)]
-    else:
-        scope = ScopeManager.allow_all(settings.scope.exclude)
+    targets, scope = _apply_scope(settings, targets)
     if not targets:
         err_console.print("[red]No in-scope targets to scan.[/]")
         return None
@@ -272,7 +344,7 @@ def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
     orchestrator = Orchestrator(settings)
     mode = "passive" if passive else "full"
     console.print(f"[bold]Starting {mode} scan of[/] "
-                  + ", ".join(f"[cyan]{t.value}[/]" for t in targets))
+                  + ", ".join(f"[cyan]{escape(t.value)}[/]" for t in targets))
     console.print("[dim]This can take from a few minutes to an hour depending on the size of "
                   "the target. Press Ctrl+C to stop early — results so far are kept.[/]\n")
 
@@ -352,6 +424,12 @@ def _print_summary(context: ScanContext) -> None:
     extra = f" (from {names:,} subdomain names in public sources)" if names > hosts else ""
     console.print(f"  {hosts} hosts{extra} · {len(sites)} live websites · {len(ports)} open "
                   f"ports · {len(observations)} things worth looking at")
+    if context.baseline is not None:
+        current = {change_key(f.kind.value, f.value, f.target) for f in findings
+                   if f.kind in TRACKED_KINDS}
+        new = len(current - context.baseline.keys)
+        style = "bold yellow" if new else "dim"
+        console.print(f"  [{style}]{new} new since the last scan of these targets[/]")
 
     order = {"high": 0, "medium": 1, "low": 2, "info": 3}
     top = sorted(observations.values(),
@@ -365,12 +443,12 @@ def _print_summary(context: ScanContext) -> None:
         table.add_column("Where", overflow="fold")
         for f in important:
             sev = f.data.get("severity", "info")
-            table.add_row(Text(sev.upper(), style=SEVERITY_STYLE.get(sev, "")), f.value,
-                          f.target or "")
+            table.add_row(Text(sev.upper(), style=SEVERITY_STYLE.get(sev, "")), Text(f.value),
+                          Text(f.target or ""))
         console.print(table)
 
-    console.print(f"\n[bold]Full report:[/] {context.reports_dir / 'report.html'}")
-    console.print(f"[dim]All results: {context.output_dir}[/]")
+    console.print("\n[bold]Full report:[/] " + escape(str(context.reports_dir / "report.html")))
+    console.print("[dim]All results: " + escape(str(context.output_dir)) + "[/]")
 
 
 def _print_plan(targets: list[Target], plan: ExecutionPlan, output_dir: Path) -> None:
@@ -378,7 +456,7 @@ def _print_plan(targets: list[Target], plan: ExecutionPlan, output_dir: Path) ->
     table.add_column("Target")
     table.add_column("Type")
     for t in targets:
-        table.add_row(t.value, t.type.value)
+        table.add_row(Text(t.value), t.type.value)
     console.print(table)
 
     console.print("\n[bold]Execution plan[/]")
@@ -386,7 +464,7 @@ def _print_plan(targets: list[Target], plan: ExecutionPlan, output_dir: Path) ->
         console.print("  (no applicable modules)")
     for i, layer in enumerate(plan, start=1):
         console.print(f"  Stage {i}: " + ", ".join(m.name for m in layer))
-    console.print(f"\nOutput directory: {output_dir}")
+    console.print("\nOutput directory: " + escape(str(output_dir)))
 
 
 def _confirm_authorisation(settings: Settings, yes: bool) -> None:
@@ -463,13 +541,13 @@ def history(
     db = settings.output.directory.expanduser() / HISTORY_DB
     scans = list_scans(Storage(db), limit)
     if not scans:
-        console.print(f"No scans recorded yet in {db.parent}.")
+        console.print("No scans recorded yet in " + escape(str(db.parent)) + ".")
         return
     table = Table(title="Previous scans", title_justify="left")
     for col in ("When (UTC)", "Targets", "Status", "Findings", "Issues", "Report"):
         table.add_column(col, overflow="fold")
     for s in scans:
-        table.add_row(str(s["started_at"])[:16].replace("T", " "), s["targets"] or "",
+        table.add_row(str(s["started_at"])[:16].replace("T", " "), Text(s["targets"] or ""),
                       s["status"], str(s["findings"]), str(s["observations"]),
-                      str(Path(s["output_dir"]) / "reports" / "report.html"))
+                      Text(str(Path(s["output_dir"]) / "reports" / "report.html")))
     console.print(table)
