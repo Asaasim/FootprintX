@@ -25,20 +25,3 @@ docs
 .claude
 docker-compose.yml
 Dockerfile
-
-# Unrelated second scaffold found nested inside the package directory (not part
-# of FootprintX's code) — keep it out of the image until it is moved or deleted.
-footprintx/footprintx
-footprintx/tests
-footprintx/config
-footprintx/input
-footprintx/scripts
-footprintx/wordlists
-footprintx/fx
-footprintx/*.md
-footprintx/*.toml
-footprintx/*.yml
-footprintx/Dockerfile
-footprintx/.dockerignore
-footprintx/.env.example
-footprintx/.gitignore
