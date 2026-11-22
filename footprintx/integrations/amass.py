@@ -1,17 +1,22 @@
-"""Amass wrapper."""
+"""Amass wrapper (OWASP) — thorough but slow passive enumeration.
+
+Amass output is not one-hostname-per-line in recent versions (it prints graph
+relations such as ``a.example.com (FQDN) --> a_record --> 192.0.2.1``), so the
+shared parser extracts every hostname under the target domain from the text.
+"""
 
 from __future__ import annotations
 
-from footprintx.core.models import Finding
-from footprintx.integrations.base import ToolIntegration
+from footprintx.integrations.base import SubdomainToolIntegration
 
 
-class AmassIntegration(ToolIntegration):
+class AmassIntegration(SubdomainToolIntegration):
     name = "amass"
     display_name = "Amass"
-    binary = "amass"
+    binaries = ("amass",)
+    apt_package = "amass"
     version_args = ("-version",)
     install_hint = "go install -v github.com/owasp-amass/amass/v5/cmd/amass@main"
 
-    def parse(self, output: str) -> list[Finding]:
-        raise NotImplementedError
+    def subdomain_args(self, domain: str) -> list[str]:
+        return ["enum", "-passive", "-d", domain]

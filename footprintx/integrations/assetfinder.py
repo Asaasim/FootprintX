@@ -1,17 +1,17 @@
-"""Assetfinder wrapper."""
+"""Assetfinder wrapper (tomnomnom) — passive subdomain discovery."""
 
 from __future__ import annotations
 
-from footprintx.core.models import Finding
-from footprintx.integrations.base import ToolIntegration
+from footprintx.integrations.base import SubdomainToolIntegration
 
 
-class AssetfinderIntegration(ToolIntegration):
+class AssetfinderIntegration(SubdomainToolIntegration):
     name = "assetfinder"
     display_name = "Assetfinder"
-    binary = "assetfinder"
-    version_args = ()
+    binaries = ("assetfinder",)
+    apt_package = "assetfinder"
+    version_args = ()  # assetfinder has no version flag
     install_hint = "go install github.com/tomnomnom/assetfinder@latest"
 
-    def parse(self, output: str) -> list[Finding]:
-        raise NotImplementedError
+    def subdomain_args(self, domain: str) -> list[str]:
+        return ["--subs-only", domain]

@@ -16,8 +16,10 @@ from pathlib import Path
 from typing import ClassVar
 
 from footprintx.core.config import get_secret
-from footprintx.core.models import Finding
+from footprintx.core.models import Finding, FindingKind
 from footprintx.core.process_manager import CommandResult, run_command
+from footprintx.utils.platform import detect_platform
+from footprintx.utils.validators import hostnames_in
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _VERSION = re.compile(r"v?\d+\.\d+(?:\.\d+)?(?:[-+.][0-9A-Za-z.]+)?")
@@ -31,25 +33,45 @@ class Integration(ABC):  # noqa: B024 — abstract marker; subclasses add the ab
     name: ClassVar[str]
     display_name: ClassVar[str]
     required: ClassVar[bool] = False
+    #: Generic (non-apt) installation instructions.
     install_hint: ClassVar[str] = ""
+
+    def installation_hint(self) -> str:
+        return self.install_hint
 
 
 class ToolIntegration(Integration):
-    binary: ClassVar[str]
+    #: Executable names in preference order — distros rename some tools
+    #: (Kali ships ProjectDiscovery's httpx as ``httpx-toolkit``).
+    binaries: ClassVar[tuple[str, ...]]
+    #: Kali/Debian package providing the tool.
+    apt_package: ClassVar[str | None] = None
     #: Arguments that print the tool's version; empty if the tool has none.
     version_args: ClassVar[tuple[str, ...]] = ("-version",)
     #: If the version output contains any of these, the binary is a different program
     #: with the same name (e.g. Python's ``httpx`` script) and is skipped on PATH.
     reject_markers: ClassVar[tuple[str, ...]] = ()
 
+    def installation_hint(self) -> str:
+        if self.apt_package and detect_platform().uses_apt:
+            return f"sudo apt install {self.apt_package}"
+        return self.install_hint
+
     def locate(self, override: str | None = None) -> str | None:
         """Resolve the executable: explicit config path first, then ``PATH``."""
         if override:
             return override if Path(override).is_file() else shutil.which(override)
+        for binary in self.binaries:
+            found = self._find_on_path(binary)
+            if found:
+                return found
+        return None
+
+    def _find_on_path(self, binary: str) -> str | None:
         if not self.reject_markers:
-            return shutil.which(self.binary)
+            return shutil.which(binary)
         for directory in os.environ.get("PATH", "").split(os.pathsep):
-            candidate = shutil.which(self.binary, path=directory) if directory else None
+            candidate = shutil.which(binary, path=directory) if directory else None
             if candidate and not any(m in self._version_output(candidate)
                                      for m in self.reject_markers):
                 return candidate
@@ -80,8 +102,23 @@ class ToolIntegration(Integration):
         return await run_command([path, *args], timeout=timeout)
 
     @abstractmethod
-    def parse(self, output: str) -> list[Finding]:
-        """Convert raw tool output into normalised findings (keep the raw output too)."""
+    def parse(self, output: str, target: str | None = None) -> list[Finding]:
+        """Convert raw tool output for ``target`` into findings (keep the raw output too)."""
+
+
+class SubdomainToolIntegration(ToolIntegration):
+    """A tool that prints discovered hostnames for a domain."""
+
+    @abstractmethod
+    def subdomain_args(self, domain: str) -> list[str]:
+        """Command-line arguments for passive subdomain enumeration of ``domain``."""
+
+    def parse(self, output: str, target: str | None = None) -> list[Finding]:
+        return [
+            Finding(FindingKind.SUBDOMAIN, host, self.name, target)
+            for host in hostnames_in(output, target)
+            if host != target
+        ]
 
 
 class ApiIntegration(Integration):

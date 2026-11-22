@@ -7,33 +7,33 @@ from footprintx.integrations.amass import AmassIntegration
 from footprintx.integrations.assetfinder import AssetfinderIntegration
 from footprintx.integrations.base import ApiIntegration, Integration, ToolIntegration
 from footprintx.integrations.crtsh import CrtShIntegration
-from footprintx.integrations.dnsx import DnsxIntegration
 from footprintx.integrations.ffuf import FfufIntegration
 from footprintx.integrations.gobuster import GobusterIntegration
 from footprintx.integrations.httpx import HttpxIntegration
 from footprintx.integrations.naabu import NaabuIntegration
 from footprintx.integrations.nmap import NmapIntegration
+from footprintx.integrations.rdap import RdapIntegration
 from footprintx.integrations.shodan import ShodanIntegration
 from footprintx.integrations.subfinder import SubfinderIntegration
+from footprintx.integrations.theharvester import TheHarvesterIntegration
 from footprintx.integrations.whatweb import WhatWebIntegration
-from footprintx.integrations.zap import ZapIntegration
 
 INTEGRATION_REGISTRY: dict[str, Integration] = {
     i.name: i
     for i in (
         SubfinderIntegration(),
-        AmassIntegration(),
         AssetfinderIntegration(),
-        DnsxIntegration(),
+        AmassIntegration(),
         HttpxIntegration(),
         NmapIntegration(),
         NaabuIntegration(),
+        WhatWebIntegration(),
         FfufIntegration(),
         GobusterIntegration(),
-        WhatWebIntegration(),
-        ShodanIntegration(),
+        TheHarvesterIntegration(),
         CrtShIntegration(),
-        ZapIntegration(),
+        RdapIntegration(),
+        ShodanIntegration(),
     )
 }
 
