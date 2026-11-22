@@ -3,13 +3,175 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FootprintX report — {{ session_id }}</title>
+  <title>FootprintX report — {{ report.targets|map(attribute="value")|join(", ") }}</title>
+  <style>
+    :root { --bg:#ffffff; --fg:#1b1f24; --muted:#59636e; --line:#d8dee4; --card:#f6f8fa;
+            --accent:#0b5cad; --high:#c62828; --medium:#b45309; --low:#8a6d00; --info:#4b5563;
+            --ok:#1a7f37; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --line:#30363d; --card:#161b22;
+              --accent:#58a6ff; --high:#ff7b72; --medium:#f0883e; --low:#e3b341; --info:#9198a1;
+              --ok:#3fb950; }
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg);
+           font:15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width:1100px; margin:0 auto; padding:28px 16px 72px; }
+    h1 { margin:0; font-size:26px; letter-spacing:-.01em; }
+    h2 { margin:40px 0 6px; font-size:19px; }
+    h3 { margin:0 0 6px; font-size:16px; word-break:break-all; }
+    p.lead { margin:2px 0 0; color:var(--muted); }
+    .hint { color:var(--muted); font-size:13.5px; margin:0 0 12px; }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+             gap:10px; margin-top:18px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+    .card b { display:block; font-size:24px; line-height:1.2; }
+    .card span { color:var(--muted); font-size:13px; }
+    .sev { display:inline-block; min-width:64px; text-align:center; padding:1px 8px;
+           border-radius:999px; font-size:12px; font-weight:600; text-transform:uppercase;
+           border:1px solid currentColor; }
+    .sev.high { color:var(--high); } .sev.medium { color:var(--medium); }
+    .sev.low { color:var(--low); } .sev.info { color:var(--info); }
+    .obs { border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin:8px 0;
+           background:var(--card); }
+    .obs .title { font-weight:600; margin-left:6px; }
+    .obs .where { color:var(--muted); font-size:13px; word-break:break-all; }
+    .host { border:1px solid var(--line); border-radius:10px; padding:14px; margin:10px 0; }
+    .host dl { display:grid; grid-template-columns:130px 1fr; gap:4px 12px; margin:0; }
+    .host dt { color:var(--muted); font-size:13.5px; }
+    .host dd { margin:0; word-break:break-word; }
+    @media (max-width:560px) { .host dl { grid-template-columns:1fr; } .host dt { margin-top:6px; } }
+    .root { margin-top:22px; font-weight:600; color:var(--accent); word-break:break-all; }
+    table { width:100%; border-collapse:collapse; font-size:13.5px; }
+    th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--muted); font-weight:600; }
+    .wrap { overflow-x:auto; }
+    code { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12.5px;
+           word-break:break-all; }
+    details { border:1px solid var(--line); border-radius:10px; margin:8px 0; padding:4px 12px; }
+    summary { cursor:pointer; padding:6px 0; font-weight:600; }
+    .success { color:var(--ok); } .failed { color:var(--high); } .skipped { color:var(--muted); }
+    .empty { color:var(--muted); font-style:italic; }
+  </style>
 </head>
 <body>
+<main>
   <h1>FootprintX report</h1>
-  <p>Session {{ session_id }} · {{ started_at }} · {{ duration }}</p>
+  <p class="lead">
+    {{ report.targets|map(attribute="value")|join(", ") }} ·
+    {{ report.started_at[:16]|replace("T", " ") }} UTC ·
+    {{ report.mode }} scan · {{ report.status }}
+    {% if report.duration is not none %} · {{ (report.duration / 60)|round(1) }} min{% endif %}
+  </p>
 
-  <h2>Scan summary</h2>
-  {# TODO: targets, module status table, asset tree, findings by kind, errors #}
+  {% set s = report.summary %}
+  <div class="cards">
+    <div class="card"><b>{{ s.hosts }}</b><span>hosts</span></div>
+    {% if s.names_discovered > s.hosts %}
+    <div class="card"><b>{{ "{:,}".format(s.names_discovered) }}</b><span>subdomain names in public sources</span></div>
+    {% endif %}
+    <div class="card"><b>{{ s.live_websites }}</b><span>live websites</span></div>
+    <div class="card"><b>{{ s.open_ports }}</b><span>open ports</span></div>
+    <div class="card"><b style="color:var(--high)">{{ s.observations.high }}</b><span>high-severity issues</span></div>
+    <div class="card"><b style="color:var(--medium)">{{ s.observations.medium }}</b><span>medium issues</span></div>
+    <div class="card"><b>{{ s.observations.low + s.observations.info }}</b><span>low / informational</span></div>
+  </div>
+
+  <h2>Things worth looking at</h2>
+  <p class="hint">Potential security issues, most serious first. These are leads for manual
+    verification, not confirmed vulnerabilities.</p>
+  {% for o in report.observations %}
+  <div class="obs">
+    <span class="sev {{ o.data.severity }}">{{ o.data.severity }}</span>
+    <span class="title">{{ o.value }}</span>
+    <div class="where">{{ o.target }}</div>
+    {% if o.data.detail %}<div>{{ o.data.detail }}</div>{% endif %}
+  </div>
+  {% else %}
+  <p class="empty">No security observations.</p>
+  {% endfor %}
+
+  <h2>Attack surface</h2>
+  <p class="hint">Everything discovered, grouped by target and host.</p>
+  {% for group in report.assets %}
+    <div class="root">{{ group.root }}</div>
+    {% for h in group.hosts %}
+    <div class="host">
+      <h3>{{ h.host }}</h3>
+      <dl>
+        {% if h.ips %}<dt>IP addresses</dt><dd><code>{{ h.ips|join(", ") }}</code></dd>{% endif %}
+        {% if h.urls %}<dt>Websites</dt><dd>
+          {% for u in h.urls %}<div><code>{{ u.url }}</code> — {{ u.status }}{% if u.title %} · “{{ u.title }}”{% endif %}{% if u.server %} · {{ u.server }}{% endif %}</div>{% endfor %}
+        </dd>{% endif %}
+        {% if h.ports %}<dt>Open ports</dt><dd>
+          {% for p in h.ports %}<div><code>{{ p.port }}/{{ p.protocol }}</code>{% if p.service %} {{ p.service }}{% endif %}</div>{% endfor %}
+        </dd>{% endif %}
+        {% if h.technologies %}<dt>Technology</dt><dd>{{ h.technologies|join(", ") }}</dd>{% endif %}
+        {% if h.endpoints %}<dt>Discovered paths</dt><dd>
+          {% for e in h.endpoints[:15] %}<div><code>{{ e }}</code></div>{% endfor %}
+          {% if h.endpoints|length > 15 %}<div class="hint">… and {{ h.endpoints|length - 15 }} more (see the tables below)</div>{% endif %}
+        </dd>{% endif %}
+        {% if h.observations %}<dt>Issues</dt><dd>
+          {% for o in h.observations %}<div><span class="sev {{ o.severity }}">{{ o.severity }}</span> {{ o.title }}</div>{% endfor %}
+        </dd>{% endif %}
+        {% if not (h.ips or h.urls or h.ports or h.technologies or h.endpoints or h.observations) %}
+          <dt>Status</dt><dd class="empty">discovered, nothing else known</dd>{% endif %}
+      </dl>
+    </div>
+    {% else %}
+    {% if not group.other_names %}<p class="empty">Nothing discovered for this target.</p>{% endif %}
+    {% endfor %}
+    {% if group.other_names %}
+    <p class="hint">+ {{ group.other_names }} more name{{ "s" if group.other_names != 1 }}
+      found in public sources with nothing else known (they don't resolve, or only match
+      wildcard DNS) — listed in <code>subdomains.txt</code>.</p>
+    {% endif %}
+  {% endfor %}
+
+  <h2>What ran</h2>
+  <div class="wrap"><table>
+    <tr><th>Step</th><th>Result</th><th>Findings</th><th>Time</th><th>Notes</th></tr>
+    {% for m in report.modules %}
+    <tr>
+      <td>{{ m.module|replace("_", " ") }}</td>
+      <td class="{{ m.status }}">{{ m.status }}</td>
+      <td>{{ m.findings }}</td>
+      <td>{% if m.duration is not none %}{{ "%.0f"|format(m.duration) }}s{% else %}–{% endif %}</td>
+      <td>{{ m.skip_reason or ((m.errors + m.notes)|join("; ")) }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+
+  <h2>All findings</h2>
+  <p class="hint">Complete lists, for reference. Click a section to expand it.</p>
+  {% for kind, items in report.findings.items() %}
+  <details>
+    <summary>{{ kind.replace("_", " ")|title }} ({{ items|length }})</summary>
+    <div class="wrap"><table>
+      <tr><th>Value</th><th>Related to</th><th>Found by</th></tr>
+      {% if items|length > 1000 %}
+      <tr><td colspan="3" class="hint">Showing the first 1000 of {{ items|length }} — the full
+        list is in the result files next to this report.</td></tr>
+      {% endif %}
+      {% for f in items[:1000] %}
+      <tr>
+        <td><code>{{ f.value }}</code>
+          {% if f.data.title %}<div class="hint">{{ f.data.title }}</div>{% endif %}
+          {% if f.data.status %}<div class="hint">HTTP {{ f.data.status }}</div>{% endif %}
+          {% if f.data.version %}<div class="hint">version {{ f.data.version }}</div>{% endif %}
+        </td>
+        <td><code>{{ f.target or "" }}</code></td>
+        <td>{{ (f.data.sources or [f.source])|join(", ") }}</td>
+      </tr>
+      {% endfor %}
+    </table></div>
+  </details>
+  {% else %}
+  <p class="empty">No findings.</p>
+  {% endfor %}
+
+  <p class="hint" style="margin-top:40px">Generated by FootprintX {{ report.version }} ·
+    session {{ report.session_id }} · raw tool output is kept in the <code>raw/</code> folder.</p>
+</main>
 </body>
 </html>
