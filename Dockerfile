@@ -24,7 +24,7 @@ ARG INSTALL_AMASS=true
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       python3 python3-venv ca-certificates libcap2-bin dnsutils \
-      subfinder assetfinder httpx-toolkit naabu nmap ffuf gobuster whatweb theharvester \
+      subfinder assetfinder findomain httpx-toolkit naabu nmap ffuf gobuster whatweb theharvester \
       $( [ "$INSTALL_AMASS" = "true" ] && echo amass ) \
  && rm -rf /var/lib/apt/lists/*
 

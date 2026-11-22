@@ -22,7 +22,7 @@ modules:
   subdomains:
     enabled: true
     # amass is thorough but slow (often 10+ minutes per domain) — add it if you want it.
-    sources: [subfinder, assetfinder, crtsh]
+    sources: [subfinder, assetfinder, findomain, crtsh]
   osint:
     enabled: true
     harvester_sources: crtsh,hackertarget,rapiddns,otx,urlscan

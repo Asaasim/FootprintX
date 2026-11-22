@@ -8,6 +8,7 @@ from footprintx.integrations.assetfinder import AssetfinderIntegration
 from footprintx.integrations.base import ApiIntegration, Integration, ToolIntegration
 from footprintx.integrations.crtsh import CrtShIntegration
 from footprintx.integrations.ffuf import FfufIntegration
+from footprintx.integrations.findomain import FindomainIntegration
 from footprintx.integrations.gobuster import GobusterIntegration
 from footprintx.integrations.httpx import HttpxIntegration
 from footprintx.integrations.naabu import NaabuIntegration
@@ -23,6 +24,7 @@ INTEGRATION_REGISTRY: dict[str, Integration] = {
     for i in (
         SubfinderIntegration(),
         AssetfinderIntegration(),
+        FindomainIntegration(),
         AmassIntegration(),
         HttpxIntegration(),
         NmapIntegration(),

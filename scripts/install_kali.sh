@@ -33,7 +33,7 @@ fi
 
 say "Step 1/5: installing tools from the Kali repositories (you may be asked for your password)"
 PACKAGES=(python3 python3-venv pipx curl dnsutils libcap2-bin
-          subfinder assetfinder amass httpx-toolkit naabu nmap ffuf gobuster whatweb theharvester)
+          subfinder assetfinder findomain amass httpx-toolkit naabu nmap ffuf gobuster whatweb theharvester)
 [ "${WITH_SECLISTS:-0}" = "1" ] && PACKAGES+=(seclists)
 sudo apt-get update
 sudo apt-get install -y "${PACKAGES[@]}"
