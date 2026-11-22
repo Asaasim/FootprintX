@@ -17,9 +17,17 @@ IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
 class ScopeManager:
-    def __init__(self, include: Iterable[str], exclude: Iterable[str] = ()) -> None:
+    def __init__(
+        self, include: Iterable[str], exclude: Iterable[str] = (), *, allow_all: bool = False
+    ) -> None:
         self._include_domains, self._include_networks = self._split(include)
         self._exclude_domains, self._exclude_networks = self._split(exclude)
+        self._allow_all = allow_all
+
+    @classmethod
+    def allow_all(cls, exclude: Iterable[str] = ()) -> ScopeManager:
+        """Used only when ``safety.respect_scope`` is disabled."""
+        return cls((), exclude, allow_all=True)
 
     @classmethod
     def from_settings(cls, scope: ScopeConfig, seeds: Iterable[Target]) -> ScopeManager:
@@ -34,13 +42,14 @@ class ScopeManager:
             if any(network.version == n.version and network.subnet_of(n)  # type: ignore[arg-type]
                    for n in self._exclude_networks):
                 return False
-            return any(network.version == n.version and network.subnet_of(n)  # type: ignore[arg-type]
-                       for n in self._include_networks)
+            return self._allow_all or any(
+                network.version == n.version and network.subnet_of(n)  # type: ignore[arg-type]
+                for n in self._include_networks)
 
         host = host.rstrip(".").lower()
         if any(self._domain_match(host, d) for d in self._exclude_domains):
             return False
-        return any(self._domain_match(host, d) for d in self._include_domains)
+        return self._allow_all or any(self._domain_match(host, d) for d in self._include_domains)
 
     # -- helpers -----------------------------------------------------------
 

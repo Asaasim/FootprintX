@@ -41,6 +41,11 @@ async def run_command(
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.CancelledError:
+        # Scan interrupted (Ctrl+C): don't leave orphaned tool processes behind.
+        if proc.returncode is None:
+            proc.kill()
+        raise
     except TimeoutError:
         proc.kill()
         await proc.wait()

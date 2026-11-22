@@ -1,8 +1,9 @@
 """Configuration loading (spec §11).
 
 Resolution order: explicit ``--config`` path → ``$FOOTPRINTX_CONFIG`` →
-``./config/config.yaml`` → built-in defaults. Secrets come from environment
-variables / ``.env`` only, never from the YAML file.
+``./config/config.yaml`` → ``~/.config/footprintx/config.yaml`` → built-in
+defaults. Secrets come from environment variables / ``.env`` files only (``./.env``
+and ``~/.config/footprintx/.env``), never from the YAML file.
 """
 
 from __future__ import annotations
@@ -17,6 +18,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 CONFIG_ENV_VAR = "FOOTPRINTX_CONFIG"
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
+USER_CONFIG_DIR = Path.home() / ".config" / "footprintx"
+USER_CONFIG_PATH = USER_CONFIG_DIR / "config.yaml"
+USER_ENV_PATH = USER_CONFIG_DIR / ".env"
+DEFAULT_RESULTS_DIR = Path.home() / "FootprintX-results"
 
 
 class ConfigError(Exception):
@@ -26,7 +31,7 @@ class ConfigError(Exception):
 class ExecutionConfig(BaseModel):
     automatic: bool = True
     concurrency: int = Field(default=10, ge=1)
-    timeout: float = Field(default=30, gt=0)
+    timeout: float = Field(default=15, gt=0)
     module_timeout: float = Field(default=1800, gt=0)
     retries: int = Field(default=2, ge=0)
     continue_on_error: bool = True
@@ -53,14 +58,14 @@ class ToolsConfig(BaseModel):
 
 
 class OutputConfig(BaseModel):
-    directory: Path = Path("results")
+    directory: Path = DEFAULT_RESULTS_DIR
     formats: list[str] = Field(default_factory=lambda: ["json", "html", "txt"])
 
 
 class SafetyConfig(BaseModel):
     require_authorization: bool = True
     respect_scope: bool = True
-    max_requests_per_second: float = Field(default=10, gt=0)
+    max_requests_per_second: float = Field(default=50, gt=0)
 
 
 class LoggingConfig(BaseModel):
@@ -86,15 +91,18 @@ class Settings(BaseModel):
 
 
 def load_settings(path: Path | str | None = None) -> Settings:
-    load_dotenv(override=False)
+    load_dotenv(Path.cwd() / ".env", override=False)  # project / current directory
+    load_dotenv(USER_ENV_PATH, override=False)        # ~/.config/footprintx/.env
 
     explicit = path or os.environ.get(CONFIG_ENV_VAR)
+    config_path: Path | None
     if explicit:
-        config_path: Path | None = Path(explicit)
+        config_path = Path(explicit)
         if not config_path.is_file():
             raise ConfigError(f"config file not found: {config_path}")
     else:
-        config_path = DEFAULT_CONFIG_PATH if DEFAULT_CONFIG_PATH.is_file() else None
+        config_path = next(
+            (p for p in (DEFAULT_CONFIG_PATH, USER_CONFIG_PATH) if p.is_file()), None)
 
     data: Any = {}
     if config_path is not None:

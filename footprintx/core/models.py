@@ -57,6 +57,20 @@ class FindingKind(StrEnum):
     OBSERVATION = "observation"
 
 
+_TARGET_SCOPED_KINDS = frozenset({
+    FindingKind.TECHNOLOGY, FindingKind.ENDPOINT, FindingKind.OBSERVATION, FindingKind.INTEL,
+})
+
+#: Severity levels for OBSERVATION findings, most severe first.
+SEVERITIES = ("high", "medium", "low", "info")
+
+
+def observation(title: str, target: str, source: str, severity: str, detail: str) -> Finding:
+    """A potential security observation (spec §8.1) — e.g. an exposed .git directory."""
+    return Finding(FindingKind.OBSERVATION, title, source, target,
+                   {"severity": severity, "detail": detail})
+
+
 @dataclass(slots=True)
 class Finding:
     """One normalised observation. ``source`` preserves attribution (spec §5.8, §9.2)."""
@@ -69,9 +83,24 @@ class Finding:
     discovered_at: datetime = field(default_factory=utc_now)
 
     @property
-    def key(self) -> tuple[FindingKind, str]:
-        """Identity used for deduplication across tools."""
-        return self.kind, self.value.lower()
+    def key(self) -> tuple[FindingKind, str, str]:
+        """Identity used for deduplication across tools.
+
+        For kinds whose value is only meaningful relative to an asset (a technology,
+        an endpoint, an observation, intel), the target is part of the identity.
+        """
+        scoped = self.kind in _TARGET_SCOPED_KINDS
+        return self.kind, self.value.lower(), (self.target or "").lower() if scoped else ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind.value,
+            "value": self.value,
+            "source": self.source,
+            "target": self.target,
+            "data": self.data,
+            "discovered_at": self.discovered_at.isoformat(),
+        }
 
 
 class ModuleStatus(StrEnum):
@@ -90,6 +119,8 @@ class ModuleResult:
     status: ModuleStatus = ModuleStatus.PENDING
     findings: list[Finding] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    #: Non-fatal remarks, e.g. "assetfinder not installed".
+    notes: list[str] = field(default_factory=list)
     skip_reason: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -99,3 +130,17 @@ class ModuleResult:
         if self.started_at and self.finished_at:
             return (self.finished_at - self.started_at).total_seconds()
         return None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Status summary (findings are reported separately)."""
+        return {
+            "module": self.module,
+            "status": self.status.value,
+            "findings": len(self.findings),
+            "errors": self.errors,
+            "notes": self.notes,
+            "skip_reason": self.skip_reason,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "duration": self.duration,
+        }

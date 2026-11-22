@@ -1,4 +1,4 @@
-"""Logging setup: Rich console output plus an optional per-scan log file (spec §6.2, §13.6)."""
+"""Logging: Rich console output plus a per-scan ``scan.log`` (spec §6.2, §13.6)."""
 
 from __future__ import annotations
 
@@ -8,25 +8,37 @@ from pathlib import Path
 from rich.logging import RichHandler
 
 ROOT_LOGGER = "footprintx"
+_FILE_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 
 
-def setup_logging(level: str = "INFO", log_file: Path | None = None) -> logging.Logger:
+def setup_logging(console_level: str = "WARNING") -> logging.Logger:
+    """Console logging at ``console_level``; file handlers may capture more."""
     logger = logging.getLogger(ROOT_LOGGER)
-    logger.setLevel(level.upper())
-    logger.handlers.clear()
+    logger.setLevel(logging.DEBUG)
     logger.propagate = False
-
-    logger.addHandler(RichHandler(rich_tracebacks=True, show_path=False, markup=False))
-
-    if log_file is not None:
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file, encoding="utf-8")
-        file_handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)-8s %(name)s: %(message)s")
-        )
-        logger.addHandler(file_handler)
-
+    for handler in [h for h in logger.handlers if isinstance(h, RichHandler)]:
+        logger.removeHandler(handler)
+    console = RichHandler(rich_tracebacks=True, show_path=False, markup=False)
+    console.setLevel(console_level.upper())
+    logger.addHandler(console)
     return logger
+
+
+def attach_log_file(path: Path, level: str = "INFO") -> logging.Handler:
+    """Add a file handler for one scan session; remove it with :func:`detach_log_file`."""
+    logger = logging.getLogger(ROOT_LOGGER)
+    logger.setLevel(logging.DEBUG)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setLevel(level.upper())
+    handler.setFormatter(logging.Formatter(_FILE_FORMAT))
+    logger.addHandler(handler)
+    return handler
+
+
+def detach_log_file(handler: logging.Handler) -> None:
+    logging.getLogger(ROOT_LOGGER).removeHandler(handler)
+    handler.close()
 
 
 def get_logger(name: str) -> logging.Logger:
