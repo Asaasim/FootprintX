@@ -1,80 +1,44 @@
 # syntax=docker/dockerfile:1.7
 #
-# FootprintX image: Python CLI + the external recon tools it orchestrates.
+# FootprintX on Kali Linux: the Python CLI plus the recon tools it orchestrates,
+# all installed from Kali's own repositories (no compiling).
 #
-#   docker build -t footprintx .                 # production image (default)
+#   docker build -t footprintx .                  # production image (default)
 #   docker build --target dev -t footprintx:dev . # + test/lint tooling
-#   docker build --build-arg INSTALL_AMASS=false . # skip the slow Amass build
+#   docker build --build-arg INSTALL_AMASS=false . # smaller image without Amass
 
-ARG PYTHON_VERSION=3.12
-ARG GO_VERSION=1.24
+FROM kalilinux/kali-rolling AS runtime
 
-# ---------------------------------------------------------------------------
-# Stage 1: build Go-based reconnaissance tools
-# ---------------------------------------------------------------------------
-FROM golang:${GO_VERSION}-bookworm AS tools
-
-# GOTOOLCHAIN=auto lets Go fetch a newer toolchain if a tool's go.mod needs one
-# (the official image defaults to "local", which breaks on version bumps).
-ENV GOTOOLCHAIN=auto \
-    GOBIN=/out \
-    CGO_ENABLED=1
-
-RUN apt-get update \
- && apt-get install -y --no-install-recommends libpcap-dev \
- && rm -rf /var/lib/apt/lists/*
-
-# One layer per tool so bumping one doesn't rebuild the rest.
-# Replace @latest with pinned versions for reproducible builds.
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go install -v github.com/tomnomnom/assetfinder@latest
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go install -v github.com/ffuf/ffuf/v2@latest
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go install -v github.com/OJ/gobuster/v3@latest
-
-ARG INSTALL_AMASS=true
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    if [ "$INSTALL_AMASS" = "true" ]; then \
-      go install -v github.com/owasp-amass/amass/v5/cmd/amass@main; \
-    fi
-
-# ---------------------------------------------------------------------------
-# Stage 2: runtime
-# ---------------------------------------------------------------------------
-FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
-
-# /opt/tools/bin comes first so ProjectDiscovery's `httpx` binary wins over the
-# `httpx` console script installed by the Python httpx library.
-ENV PYTHONDONTWRITEBYTECODE=1 \
+# /opt/venv/bin holds the Python httpx library's `httpx` script; FootprintX
+# uses Kali's `httpx-toolkit` binary instead, so there is no clash.
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     VIRTUAL_ENV=/opt/venv \
-    PATH="/opt/tools/bin:/opt/venv/bin:${PATH}" \
+    PATH="/opt/venv/bin:${PATH}" \
     NMAP_PRIVILEGED=1
 
+ARG INSTALL_AMASS=true
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      nmap whatweb dnsutils libpcap0.8 libcap2-bin ca-certificates \
+      python3 python3-venv ca-certificates libcap2-bin dnsutils \
+      subfinder assetfinder httpx-toolkit naabu nmap ffuf gobuster whatweb theharvester \
+      $( [ "$INSTALL_AMASS" = "true" ] && echo amass ) \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=tools /out/ /opt/tools/bin/
+# Raw-socket (SYN) scans as a non-root user. Kali's /usr/bin/nmap is a wrapper
+# script around /usr/lib/nmap/nmap, which ships with net_admin + net_bind_service
+# + net_raw. The container only keeps CAP_NET_RAW (docker-compose.yml drops ALL),
+# and the kernel refuses to exec a binary whose file capabilities exceed that —
+# so reduce both scanners to exactly cap_net_raw.
+RUN setcap cap_net_raw+eip /usr/lib/nmap/nmap \
+ && setcap cap_net_raw+eip "$(command -v naabu)" \
+ && getcap /usr/lib/nmap/nmap "$(command -v naabu)"
 
-# Raw-socket scans (SYN scans) as a non-root user. Only CAP_NET_RAW is granted —
-# it is the one capability docker-compose.yml adds back after dropping ALL.
-RUN setcap cap_net_raw+eip /usr/bin/nmap \
- && setcap cap_net_raw+eip /opt/tools/bin/naabu
-
-RUN python -m venv "$VIRTUAL_ENV"
+# Kali's system Python is externally managed (PEP 668), so use a venv.
+RUN python3 -m venv "$VIRTUAL_ENV"
 WORKDIR /app
 
 # Dependencies first for layer caching, then the package itself.
@@ -86,24 +50,26 @@ RUN pip install --no-deps .
 
 COPY config ./config
 
-# Default fuzzing wordlist (SecLists common.txt). Pin a commit SHA for reproducibility.
+# Default fuzzing wordlist (SecLists common.txt) — the full seclists package is ~1 GB.
+# Pin a commit SHA instead of `master` for reproducible builds.
 ADD https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt \
     /app/wordlists/common.txt
 
 ARG UID=1000
 RUN useradd --create-home --uid "${UID}" footprintx \
- && mkdir -p /app/results /app/wordlists/custom \
+ && mkdir -p /app/results /app/wordlists/custom /app/targets \
  && chmod 644 /app/wordlists/common.txt \
  && chown -R footprintx:footprintx /app/results
 
 USER footprintx
 VOLUME ["/app/results"]
 
+# No arguments = guided, question-and-answer scan (`docker compose run --rm footprintx`).
 ENTRYPOINT ["footprintx"]
-CMD ["--help"]
+CMD []
 
 # ---------------------------------------------------------------------------
-# Stage 3: dev / test image
+# Dev / test image
 # ---------------------------------------------------------------------------
 FROM runtime AS dev
 
