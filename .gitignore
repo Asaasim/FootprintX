@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets — never commit API keys
+.env
+.env.*
+!.env.example
+
+# Scan output and local data
+results/*
+!results/.gitkeep
+*.db
+*.sqlite3
+
+# Target lists (often client-sensitive)
+targets/*
+!targets/.gitkeep
+
+# Downloaded wordlists (fetch with scripts/fetch_wordlists.sh)
+wordlists/*
+!wordlists/.gitkeep
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
