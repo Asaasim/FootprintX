@@ -1,4 +1,9 @@
-"""Shodan API client — indexed ports, banners and vulnerability indicators."""
+"""Shodan API client — indexed ports, banners and vulnerability indicators.
+
+The API key travels in the query string (Shodan's only option), so httpx's own
+error messages — which include the full URL — must never be surfaced. Errors are
+re-raised with messages that contain only the status code.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +12,14 @@ from typing import Any
 import httpx
 
 from footprintx.integrations.base import ApiIntegration
+from footprintx.utils.http import RetryableHTTPError, get_with_retries
 
 
 class ShodanAuthError(RuntimeError):
+    pass
+
+
+class ShodanError(RuntimeError):
     pass
 
 
@@ -20,18 +30,28 @@ class ShodanIntegration(ApiIntegration):
     api_key_env = "SHODAN_API_KEY"
     install_hint = "Create a free account at https://account.shodan.io and copy the API key"
 
-    async def host(self, client: httpx.AsyncClient, ip: str) -> dict[str, Any] | None:
+    async def host(self, client: httpx.AsyncClient, ip: str, retries: int = 2
+                   ) -> dict[str, Any] | None:
         """Shodan's record for ``ip``; None if Shodan has never indexed it."""
-        response = await client.get(f"{self.base_url}/shodan/host/{ip}",
-                                    params={"key": self.api_key() or ""})
+        try:
+            response = await get_with_retries(
+                client, f"{self.base_url}/shodan/host/{ip}",
+                params={"key": self.api_key() or ""}, retries=retries)
+        except RetryableHTTPError as exc:
+            raise ShodanError(f"Shodan unavailable (HTTP {exc.status_code})") from None
+        except httpx.HTTPError as exc:
+            # str(exc) may contain the request URL — and with it the API key.
+            raise ShodanError(f"Shodan request failed ({type(exc).__name__})") from None
         if response.status_code == 404:
             return None
         if response.status_code in (401, 403):
             raise ShodanAuthError("Shodan rejected the API key (check SHODAN_API_KEY)")
-        if response.status_code == 429:
-            raise RuntimeError("Shodan rate limit reached")
-        response.raise_for_status()
-        data = response.json()
+        if response.status_code >= 400:
+            raise ShodanError(f"Shodan returned HTTP {response.status_code}")
+        try:
+            data = response.json()
+        except ValueError:
+            raise ShodanError("Shodan returned an invalid response") from None
         return data if isinstance(data, dict) else None
 
     @staticmethod

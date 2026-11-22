@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from footprintx.integrations.base import ApiIntegration
-from footprintx.utils.http import make_client
+from footprintx.utils.http import get_with_retries, make_client
 
 
 class RdapIntegration(ApiIntegration):
@@ -21,12 +21,14 @@ class RdapIntegration(ApiIntegration):
     install_hint = "No credentials required"
 
     async def lookup(self, kind: str, value: str, *, timeout: float,
-                     client: httpx.AsyncClient | None = None) -> dict[str, Any] | None:
+                     client: httpx.AsyncClient | None = None, retries: int = 2
+                     ) -> dict[str, Any] | None:
         """``kind`` is "domain" or "ip". Returns None when the registry has no record."""
         owns_client = client is None
         client = client or make_client(timeout, verify=True)
         try:
-            response = await client.get(f"{self.base_url}/{kind}/{value}")
+            response = await get_with_retries(client, f"{self.base_url}/{kind}/{value}",
+                                              retries=retries)
             if response.status_code == 404:
                 return None
             response.raise_for_status()

@@ -66,6 +66,9 @@ class SafetyConfig(BaseModel):
     require_authorization: bool = True
     respect_scope: bool = True
     max_requests_per_second: float = Field(default=50, gt=0)
+    #: Actively scan hostnames that resolve to private/internal addresses (internal
+    #: tests). Loopback and link-local addresses are never scanned via a hostname.
+    allow_internal_targets: bool = False
 
 
 class LoggingConfig(BaseModel):

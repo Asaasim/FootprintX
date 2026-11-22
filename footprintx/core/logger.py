@@ -7,6 +7,8 @@ from pathlib import Path
 
 from rich.logging import RichHandler
 
+from footprintx.utils.sanitize import RedactingFilter, safe
+
 ROOT_LOGGER = "footprintx"
 _FILE_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 
@@ -20,8 +22,16 @@ def setup_logging(console_level: str = "WARNING") -> logging.Logger:
         logger.removeHandler(handler)
     console = RichHandler(rich_tracebacks=True, show_path=False, markup=False)
     console.setLevel(console_level.upper())
+    console.addFilter(RedactingFilter())
     logger.addHandler(console)
     return logger
+
+
+class _SafeFormatter(logging.Formatter):
+    """Masks secrets/control characters in the fully formatted record (incl. tracebacks)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return safe(super().format(record))
 
 
 def attach_log_file(path: Path, level: str = "INFO") -> logging.Handler:
@@ -31,7 +41,7 @@ def attach_log_file(path: Path, level: str = "INFO") -> logging.Handler:
     path.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(path, encoding="utf-8")
     handler.setLevel(level.upper())
-    handler.setFormatter(logging.Formatter(_FILE_FORMAT))
+    handler.setFormatter(_SafeFormatter(_FILE_FORMAT))
     logger.addHandler(handler)
     return handler
 

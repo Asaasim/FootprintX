@@ -6,8 +6,9 @@ import os
 import platform
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
-from footprintx.core.config import Settings
+from footprintx.core.config import USER_ENV_PATH, Settings
 from footprintx.integrations import INTEGRATION_REGISTRY
 from footprintx.integrations.base import ApiIntegration, Integration, ToolIntegration
 from footprintx.utils.platform import detect_platform, has_raw_socket_capability
@@ -26,7 +27,7 @@ class CheckResult:
 
 
 def run_doctor(settings: Settings, config_error: str | None = None) -> list[CheckResult]:
-    return [
+    results = [
         check_python(),
         check_os(),
         check_privileges(settings),
@@ -34,6 +35,10 @@ def run_doctor(settings: Settings, config_error: str | None = None) -> list[Chec
         check_wordlist(settings),
         check_config(settings, config_error),
     ]
+    secrets = check_secret_files()
+    if secrets is not None:
+        results.append(secrets)
+    return results
 
 
 def check_python() -> CheckResult:
@@ -114,6 +119,23 @@ def check_wordlist(settings: Settings) -> CheckResult:
         else "sudo apt install seclists  (or scripts/fetch_wordlists.sh)"
     )
     return CheckResult("Fuzzing Wordlist", False, "Missing", hint)
+
+
+def check_secret_files() -> CheckResult | None:
+    """API keys live in .env files; they must not be readable by other users (spec §13.5)."""
+    if os.name != "posix":
+        return None
+    exposed = []
+    for path in (Path.cwd() / ".env", USER_ENV_PATH):
+        try:
+            if path.is_file() and path.stat().st_mode & 0o077:
+                exposed.append(str(path))
+        except OSError:
+            continue
+    if exposed:
+        return CheckResult("API Key Files", False, "Too Open",
+                           "readable by other users — run: chmod 600 " + " ".join(exposed))
+    return CheckResult("API Key Files", True, "Protected")
 
 
 def check_config(settings: Settings, error: str | None) -> CheckResult:

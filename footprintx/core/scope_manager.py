@@ -35,6 +35,14 @@ class ScopeManager:
         include = scope.include or [t.host or t.value for t in seeds]
         return cls(include, scope.exclude)
 
+    def explicitly_includes(self, value: str) -> bool:
+        """In scope because an include entry names it — ignoring ``allow_all`` mode."""
+        allow_all, self._allow_all = self._allow_all, False
+        try:
+            return self.is_in_scope(value)
+        finally:
+            self._allow_all = allow_all
+
     def is_in_scope(self, value: str) -> bool:
         host = self._host_of(value)
         network = self._as_network(host)

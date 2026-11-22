@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+
+# defusedxml rejects entity-expansion / external-entity tricks; the XML embeds
+# service banners chosen by remote servers.
+import defusedxml.ElementTree as ET
+from defusedxml import DefusedXmlException
 
 from footprintx.core.models import Finding, FindingKind
 from footprintx.integrations.base import ToolIntegration
@@ -95,7 +99,7 @@ def _hosts(xml_text: str) -> list[dict[str, Any]]:
         return []
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError:
+    except (ET.ParseError, DefusedXmlException):
         return []
     hosts = []
     for host in root.iter("host"):

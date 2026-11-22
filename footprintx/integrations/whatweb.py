@@ -27,11 +27,15 @@ class WhatWebIntegration(ToolIntegration):
     version_args = ("--version",)
     install_hint = "apt install whatweb"
 
-    def scan_args(self, input_file: str, json_out: str, *, threads: int = 10) -> list[str]:
+    def scan_args(self, input_file: str, json_out: str, *, threads: int = 10,
+                  proxy: str | None = None) -> list[str]:
         # --follow-redirect=never: a redirect could lead outside the authorised scope.
-        return ["--input-file", input_file, f"--log-json={json_out}", "--color=never",
+        args = ["--input-file", input_file, f"--log-json={json_out}", "--color=never",
                 "--no-errors", "-a", "1", "-t", str(threads), "--quiet",
                 "--follow-redirect=never"]
+        if proxy:
+            args.append(f"--proxy={proxy.split('://', 1)[-1].rstrip('/')}")  # host:port
+        return args
 
     def parse(self, output: str, target: str | None = None) -> list[Finding]:
         findings: list[Finding] = []

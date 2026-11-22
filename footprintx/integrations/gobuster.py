@@ -21,10 +21,10 @@ class GobusterIntegration(ToolIntegration):
     install_hint = "go install github.com/OJ/gobuster/v3@latest"
 
     def fuzz_args(self, base_url: str, wordlist: str, *, threads: int, timeout: int,
-                  match_status: list[int], extensions: list[str],
+                  match_status: list[int], extensions: list[str], method: str = "GET",
                   proxy: str | None = None) -> list[str]:
         args = [
-            "dir", "-u", base_url, "-w", wordlist, "-q", "--no-color", "-k",
+            "dir", "-u", base_url, "-w", wordlist, "-q", "--no-color", "-k", "-m", method,
             "-t", str(threads), "--timeout", f"{timeout}s",
             "-s", ",".join(map(str, match_status)), "-b", "",
         ]

@@ -18,9 +18,9 @@ class FfufIntegration(ToolIntegration):
 
     def fuzz_args(self, base_url: str, wordlist: str, json_out: str, *, threads: int,
                   rate: int, timeout: int, match_status: list[int], extensions: list[str],
-                  proxy: str | None = None) -> list[str]:
+                  method: str = "GET", proxy: str | None = None) -> list[str]:
         args = [
-            "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist,
+            "-u", f"{base_url.rstrip('/')}/FUZZ", "-w", wordlist, "-X", method,
             "-of", "json", "-o", json_out, "-s", "-noninteractive",
             "-ac",                                   # auto-calibrate away soft-404s
             "-t", str(threads), "-rate", str(rate), "-timeout", str(timeout),
