@@ -29,6 +29,8 @@ class BaseModule(ABC):
     integrations: ClassVar[tuple[str, ...]] = ()
     #: Used when the config file does not mention this module.
     enabled_by_default: ClassVar[bool] = True
+    #: Sends traffic to the targets themselves (skipped in passive mode).
+    active: ClassVar[bool] = False
 
     def __init__(self, config: ModuleConfig | None = None) -> None:
         self.config = config or ModuleConfig(enabled=self.enabled_by_default)
