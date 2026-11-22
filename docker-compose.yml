@@ -1,0 +1,47 @@
+# Usage:
+#   docker compose build
+#   docker compose run --rm footprintx scan -t example.com
+#   docker compose run --rm footprintx doctor
+#   docker compose --profile dev run --rm tests
+
+name: footprintx
+
+x-security: &security
+  # Drop everything, add back only raw sockets (nmap/naabu SYN scans).
+  # Do NOT add `no-new-privileges` — it blocks the file capabilities set on nmap/naabu.
+  cap_drop: [ALL]
+  cap_add: [NET_RAW]
+
+services:
+  footprintx:
+    <<: *security
+    build:
+      context: .
+      target: production
+    image: footprintx:latest
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./results:/app/results
+      - ./config:/app/config:ro
+      - ./wordlists:/app/wordlists/custom:ro
+      - ./targets:/app/targets:ro
+    extra_hosts:
+      # Lets the proxy module reach Burp / ZAP running on the host machine.
+      - "host.docker.internal:host-gateway"
+    # On Linux, use `network_mode: host` instead if you need to scan the host's LAN directly.
+
+  tests:
+    <<: *security
+    build:
+      context: .
+      target: dev
+    image: footprintx:dev
+    profiles: [dev]
+    volumes:
+      - ./footprintx:/app/footprintx
+      - ./tests:/app/tests
+      - ./config:/app/config:ro
+    command: ["pytest"]
