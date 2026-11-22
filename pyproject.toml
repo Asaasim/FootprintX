@@ -50,16 +50,6 @@ path = "footprintx/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["footprintx"]
-# Unrelated nested scaffold inside the package dir — never ship it.
-exclude = [
-    "footprintx/footprintx",
-    "footprintx/tests",
-    "footprintx/config",
-    "footprintx/input",
-    "footprintx/scripts",
-    "footprintx/wordlists",
-    "footprintx/fx",
-]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -74,7 +64,6 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["footprintx/footprintx", "footprintx/tests", "footprintx/scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
@@ -85,4 +74,3 @@ python_version = "3.11"
 ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = true
-exclude = ["^footprintx/footprintx/", "^footprintx/tests/", "^footprintx/scripts/"]
