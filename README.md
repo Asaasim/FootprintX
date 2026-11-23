@@ -21,7 +21,7 @@ Give it a domain, URL, IP address, IP range or a file of targets. FootprintX wor
 
 | Step | Tools (Kali packages) | Built-in fallback |
 | --- | --- | --- |
-| Subdomain discovery | Subfinder, Assetfinder, Amass (optional), crt.sh | — |
+| Subdomain discovery | Subfinder, Assetfinder, Findomain, Amass (optional), crt.sh | zone transfers |
 | Public intelligence (OSINT) | theHarvester, RDAP registration data | RDAP only |
 | DNS records + SPF / DMARC / CAA / zone-transfer / wildcard checks | — | native resolver |
 | IP mapping, live-host sweep of ranges, reverse DNS | Nmap | all addresses kept |
@@ -34,7 +34,7 @@ Give it a domain, URL, IP address, IP range or a file of targets. FootprintX wor
 
 A failing or missing tool never stops the scan: its step is skipped or falls back, and the report says so. **Passive mode** (`--passive`, or option 2 in the guided mode) uses public sources only and never contacts the target's servers.
 
-Every scan creates `results/<target>/scan_<timestamp>/` with `reports/report.html` (readable summary, security observations ranked by severity, per-host attack-surface map), `report.json`, `report.txt`, per-category files (`subdomains.txt`, `open_ports.json`, …), `scan.log` and untouched tool output in `raw/`. Scan history is kept in `results/footprintx.db` (`footprintx history`).
+Every scan creates `results/<target>/scan_<timestamp>/` with `reports/report.html` (readable summary, security observations ranked by severity, per-host attack-surface map), `report.json`, `report.txt`, `findings.csv`, per-category files (`subdomains.txt`, `open_ports.json`, `shodan_results.json`, …), `scan.log` (including an audit trail of every tool command run) and untouched tool output in `raw/`. Scan history is kept in `results/footprintx.db` (`footprintx history`); each scan is compared with the previous one of the same targets, and anything **new since the last scan** is highlighted.
 
 ## Commands
 
@@ -44,6 +44,9 @@ footprintx scan -t example.com                   # domain, subdomain, URL, IP, I
 footprintx scan -l targets.txt -o ./results      # bulk targets
 footprintx scan -t example.com --passive         # public sources only
 footprintx scan -t example.com --exclude shodan,web_fuzzing
+footprintx scan -t example.com --scope scope.txt   # authorised scope (domains/IPs/CIDRs, or a file)
+footprintx scan -t example.com -w words.txt      # custom fuzzing wordlist
+footprintx scan -t corp.example --allow-internal # internal test: scan names resolving to 10.x etc.
 footprintx scan -t example.com --dry-run         # show the execution plan only
 footprintx scan -t example.com --yes -v          # skip the authorisation prompt, debug logs
 footprintx doctor                                # check tools, API keys, config
@@ -72,6 +75,18 @@ docker compose run --rm footprintx scan -l targets/targets.txt --yes   # file in
 
 Results go to `./results`; `./config` is mounted read-only; files in `./wordlists` appear at `/app/wordlists/custom`; bulk target files go in `./targets` (gitignored). The container drops all Linux capabilities except `NET_RAW` (for SYN scans). Build args: `INSTALL_AMASS=false` leaves Amass out; `UID=$(id -u)` matches the container user to yours on Linux. To reach Burp/ZAP on the host, set the proxy URL to `http://host.docker.internal:8080`.
 
+## Safety and security
+
+FootprintX is built to be safe to point at real organisations:
+
+- **Scope is enforced everywhere.** Only the targets you give (or `--scope` / `scope.include`) are touched; discovered names outside it are dropped, redirects to out-of-scope sites are never followed, and fuzzing only uses read-only HTTP methods.
+- **No SSRF via DNS.** A target's subdomain that points at `127.0.0.1`, `169.254.169.254` (cloud metadata) or an internal network is reported, not scanned (`--allow-internal` opts in to internal ranges; loopback/link-local never).
+- **Secrets stay secret.** API keys live only in `.env` files (`doctor` warns if they're readable by others) and are masked in every log, report and error message.
+- **Hostile targets can't attack you.** Terminal escape sequences are stripped, HTML reports escape everything, CSV cells can't run formulas, XML is parsed with `defusedxml`, response bodies and tool output are size-capped, and tools run without a shell.
+- **Results are private** (scan folders are mode 700) and the container runs as a non-root user with every capability dropped except `NET_RAW`.
+
+These properties are verified by an isolated Docker lab — see *End-to-end tests* below.
+
 ## Development
 
 ```bash
@@ -81,6 +96,15 @@ pytest && ruff check footprintx tests && mypy footprintx
 ```
 
 Tests also run in the container: `docker compose --profile dev run --rm tests`.
+
+### End-to-end tests
+
+`tests/e2e/` contains a self-contained lab on an internal Docker network (no internet): a DNS server that allows zone transfers and has trap records (loopback, cloud metadata, internal and public addresses), vulnerable web vhosts (exposed `.git`/`.env`, directory listing, a page with a `<script>`/ANSI-escape title, redirects to an out-of-scope site), an exposed Redis and an out-of-scope server that must never receive traffic.
+
+```bash
+docker compose build footprintx
+FOOTPRINTX_E2E=1 pytest tests/e2e -v      # ~10 minutes
+```
 
 ```text
 footprintx/

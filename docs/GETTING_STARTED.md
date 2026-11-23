@@ -65,6 +65,7 @@ The report has four parts:
 
   These are **leads to check**, not confirmed vulnerabilities.
 
+- **New since the last scan** — if you scanned the same target before, anything that has appeared since (a new subdomain, a newly opened port, a new issue) is listed at the top and marked **NEW**.
 - **Attack surface** — one card per host with its IP addresses, websites, open ports and technologies.
 - **What ran / All findings** — the full details, for reference.
 
