@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import re
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
+
+import httpx
 
 from footprintx.core.models import (
     ALL_TARGET_TYPES,
@@ -33,6 +35,8 @@ from footprintx.modules.common import (
 )
 from footprintx.modules.common import run_tool as run_external
 from footprintx.utils.helpers import safe_dirname
+from footprintx.utils.http import fetch_limited, make_client
+from footprintx.utils.ratelimit import RateLimiter
 from footprintx.utils.wordlists import resolve_wordlist
 
 if TYPE_CHECKING:
@@ -60,6 +64,10 @@ SENSITIVE = [
      {200, 401, 403}),
 ]
 _SENSITIVE = [(re.compile(p, re.IGNORECASE), t, s, codes) for p, t, s, codes in SENSITIVE]
+#: Page markers of auto-generated directory listings (Apache, nginx, IIS, Python, …).
+_LISTING = re.compile(r"<title>\s*(Index of /|Directory listing for)|<h1>\s*Index of /"
+                      r"|\[To Parent Directory\]", re.IGNORECASE)
+MAX_LISTING_CHECKS = 50
 
 
 class WebFuzzingModule(BaseModule):
@@ -68,6 +76,8 @@ class WebFuzzingModule(BaseModule):
     applies_to = ALL_TARGET_TYPES
     depends_on = ("http_probe",)
     integrations = ("ffuf", "gobuster")
+    options = frozenset({"extensions", "match_status", "max_targets", "method",
+                         "parallel", "rate", "target_timeout", "threads", "wordlist"})
     active = True
 
     async def run(self, context: ScanContext) -> ModuleResult:
@@ -117,6 +127,7 @@ class WebFuzzingModule(BaseModule):
                 if context.scope.is_in_scope(f.value):
                     result.findings.append(f)
         result.findings += self._observations(result.findings)
+        result.findings += await self._directory_listings(result.findings, context)
         if result.errors and len(result.errors) == len(bases):
             result.status = ModuleStatus.FAILED
         return result
@@ -163,6 +174,41 @@ class WebFuzzingModule(BaseModule):
             last = (cmd.stderr.strip().splitlines() or ["no output"])[-1]
             raise RuntimeError(f"gobuster exit {cmd.returncode}: {last[:200]}")
         return findings
+
+    async def _directory_listings(self, endpoints: list[Finding], context: ScanContext
+                                  ) -> list[Finding]:
+        """Fuzzers only see status codes, so open each discovered *directory* once and
+        check whether the server lists its contents (in scope, rate-limited, capped)."""
+        candidates: dict[str, None] = {}
+        for f in endpoints:
+            status = int(f.data.get("status") or 0)
+            redirect = str(f.data.get("redirect") or "")
+            if status == 200 and f.value.endswith("/"):
+                candidates[f.value] = None
+            elif status in (301, 302, 307, 308) and redirect.endswith("/"):
+                candidates[urljoin(f.value, redirect)] = None
+        urls = [u for u in candidates if context.scope.is_in_scope(u)][:MAX_LISTING_CHECKS]
+        if not urls:
+            return []
+
+        limiter = RateLimiter(context.settings.safety.max_requests_per_second)
+        found: list[Finding] = []
+        async with make_client(float(context.settings.execution.timeout),
+                               follow_redirects=False, proxy=active_proxy(context)) as client:
+            async def check(url: str) -> None:
+                await limiter.wait()
+                try:
+                    page = await fetch_limited(client, url, max_bytes=200_000)
+                except (httpx.HTTPError, ValueError):
+                    return
+                if page.status_code == 200 and _LISTING.search(page.text):
+                    found.append(observation(
+                        "Directory listing enabled", url, self.name, "medium",
+                        f"{url} lists its files, which can expose content not meant "
+                        "to be public."))
+
+            await asyncio.gather(*(check(u) for u in urls))
+        return found
 
     @staticmethod
     def _observations(endpoints: list[Finding]) -> list[Finding]:

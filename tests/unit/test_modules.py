@@ -97,12 +97,12 @@ async def test_dns_drops_wildcard_only_subdomains(tmp_path, monkeypatch):
         ("junk.example.com", "A"): [("198.51.100.9", 300)],
     }
 
-    async def fake_query(self, name, rtype, resolver=None):
+    async def fake_lookup(self, name, rtype, resolver=None):
         if name.startswith("fx-") and rtype == "A":
             return [("198.51.100.9", 60)]          # wildcard answer
         return answers.get((name, rtype), [])
 
-    monkeypatch.setattr(DnsModule, "_query", fake_query)
+    monkeypatch.setattr(DnsModule, "_lookup", fake_lookup)
     ctx = make_context(tmp_path, passive=True)
     add_result(ctx, "subdomains",
                Finding(FindingKind.SUBDOMAIN, "real.example.com", "t"),
@@ -115,6 +115,28 @@ async def test_dns_drops_wildcard_only_subdomains(tmp_path, monkeypatch):
     titles = {f.value for f in result.findings if f.kind is FindingKind.OBSERVATION}
     assert {"Wildcard DNS enabled", "No DMARC record", "No CAA record"} <= titles
     assert "No SPF record" not in titles
+
+
+async def test_dns_failed_lookups_are_not_reported_as_missing_records(tmp_path, monkeypatch):
+    """A timeout/SERVFAIL means "unknown", never "No SPF/DMARC/CAA record"."""
+    import dns.exception
+
+    async def timing_out_resolve(self, name, rtype, raise_on_no_answer=False):
+        if rtype in ("TXT", "CAA"):
+            raise dns.exception.Timeout
+        raise dns.resolver.NXDOMAIN
+
+    import dns.asyncresolver
+    import dns.resolver
+    monkeypatch.setattr(dns.asyncresolver.Resolver, "resolve", timing_out_resolve)
+    ctx = make_context(tmp_path, passive=True)
+    result = await DnsModule(ModuleConfig()).run(ctx)
+
+    titles = {f.value for f in result.findings if f.kind is FindingKind.OBSERVATION}
+    assert not titles & {"No SPF record", "No DMARC record", "No CAA record"}
+    assert any("SPF, DMARC, CAA of example.com could not be checked" in n
+               for n in result.notes)
+    assert any("DNS lookups timed out" in n for n in result.notes)
 
 
 def test_txt_unquote():
@@ -248,3 +270,28 @@ def test_correlator_builds_asset_tree():
     assert host["ports"][0]["port"] == 443          # attached via the IP
     assert host["technologies"] == ["Nginx 1.24"]
     assert host["observations"][0]["severity"] == "high"
+
+
+async def test_directory_listing_detected_on_fuzzed_directories(tmp_path, monkeypatch):
+    def handler(request):
+        if request.url.path == "/files/":
+            return httpx.Response(200, text="<html><head><title>Index of /files/</title>")
+        if request.url.path == "/docs/":
+            return httpx.Response(200, text="<html><head><title>Docs</title>")
+        raise AssertionError(f"unexpected request {request.url}")
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr("footprintx.modules.web_fuzzing.module.make_client",
+                        lambda *a, **k: real_client(transport=httpx.MockTransport(handler)))
+    endpoints = [
+        Finding(FindingKind.ENDPOINT, "https://example.com/files", "ffuf", "https://example.com",
+                {"status": 301, "redirect": "/files/"}),
+        Finding(FindingKind.ENDPOINT, "https://example.com/docs/", "ffuf", "https://example.com",
+                {"status": 200}),
+        Finding(FindingKind.ENDPOINT, "https://example.com/away", "ffuf", "https://example.com",
+                {"status": 302, "redirect": "https://evil.net/dir/"}),   # out of scope: skipped
+    ]
+    found = await WebFuzzingModule(ModuleConfig())._directory_listings(
+        endpoints, make_context(tmp_path))
+    assert [(f.value, f.target, f.data["severity"]) for f in found] == [
+        ("Directory listing enabled", "https://example.com/files/", "medium")]
