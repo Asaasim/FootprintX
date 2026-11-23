@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 CONFIG_ENV_VAR = "FOOTPRINTX_CONFIG"
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
@@ -66,9 +66,23 @@ class ToolsConfig(BaseModel):
     paths: dict[str, str] = Field(default_factory=dict)
 
 
+#: Report formats ``output.formats`` accepts (see footprintx.reporting.pipeline).
+REPORT_FORMATS = ("json", "html", "txt", "csv", "xml")
+
+
 class OutputConfig(BaseModel):
     directory: Path = DEFAULT_RESULTS_DIR
     formats: list[str] = Field(default_factory=lambda: ["json", "html", "txt", "csv"])
+
+    @field_validator("formats")
+    @classmethod
+    def _known_formats(cls, value: list[str]) -> list[str]:
+        formats = [f.strip().lower() for f in value]
+        unknown = [f for f in formats if f not in REPORT_FORMATS]
+        if unknown:
+            raise ValueError(f"unknown report format(s) {', '.join(unknown)}; "
+                             f"choose from {', '.join(REPORT_FORMATS)}")
+        return formats
 
 
 class SafetyConfig(BaseModel):
