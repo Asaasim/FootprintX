@@ -32,6 +32,7 @@ from footprintx.integrations.httpx import HttpxIntegration
 from footprintx.modules.base import BaseModule
 from footprintx.modules.common import (
     active_proxy,
+    dns_resolvers,
     locate,
     missing_tool_note,
     resolved_hostnames,
@@ -55,6 +56,7 @@ class HttpProbeModule(BaseModule):
     applies_to = ALL_TARGET_TYPES
     depends_on = ("ip_discovery",)
     integrations = ("httpx",)
+    options = frozenset({"engine", "rate", "threads"})
     active = True
 
     async def run(self, context: ScanContext) -> ModuleResult:
@@ -81,7 +83,8 @@ class HttpProbeModule(BaseModule):
             cmd = await run_tool(
                 context, tool, path,
                 tool.probe_args(str(input_file), threads=threads, rate=rate,
-                                timeout=int(timeout), proxy=proxy),
+                                timeout=int(timeout), proxy=proxy,
+                                resolvers=dns_resolvers(context)),
                 "httpx.jsonl", timeout=settings.execution.module_timeout)
             probes = tool.parse_probes(cmd.stdout)
             source = tool.name

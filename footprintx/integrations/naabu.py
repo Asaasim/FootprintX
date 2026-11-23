@@ -17,17 +17,21 @@ class NaabuIntegration(ToolIntegration):
     install_hint = "go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"
 
     def port_scan_args(self, targets_file: str, *, top_ports: int, rate: int,
-                       raw_sockets: bool, ports: list[int] | None = None) -> list[str]:
+                       raw_sockets: bool, ports: list[int] | None = None,
+                       resolvers: list[str] | None = None) -> list[str]:
         if ports:
             port_args = ["-p", ",".join(map(str, ports))]
         else:
             # naabu only accepts the presets 100, 1000 or full for -top-ports.
             preset = "100" if top_ports <= 100 else "1000" if top_ports <= 1000 else "full"
             port_args = ["-top-ports", preset]
-        return [
+        args = [
             "-list", targets_file, "-json", "-silent", "-nc", *port_args,
             "-rate", str(rate), "-scan-type", "s" if raw_sockets else "c",
         ]
+        if resolvers:  # otherwise naabu uses its own public resolver list
+            args += ["-r", ",".join(resolvers)]
+        return args
 
     def parse(self, output: str, target: str | None = None) -> list[Finding]:
         findings: list[Finding] = []

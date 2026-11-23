@@ -27,7 +27,8 @@ class HttpxIntegration(ToolIntegration):
     install_hint = "go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest"
 
     def probe_args(self, input_file: str, *, threads: int, rate: int, timeout: int,
-                   proxy: str | None = None) -> list[str]:
+                   proxy: str | None = None, resolvers: list[str] | None = None
+                   ) -> list[str]:
         args = [
             "-l", input_file, "-json", "-silent", "-nc",
             "-sc", "-title", "-server", "-td", "-cl", "-location", "-ip", "-cdn",
@@ -36,6 +37,8 @@ class HttpxIntegration(ToolIntegration):
         ]
         if proxy:
             args += ["-http-proxy", proxy]
+        if resolvers:  # otherwise httpx uses its own public resolver list
+            args += ["-r", ",".join(resolvers)]
         return args
 
     def parse_probes(self, output: str) -> list[dict[str, Any]]:

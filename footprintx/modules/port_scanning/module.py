@@ -22,6 +22,7 @@ from footprintx.integrations.naabu import NaabuIntegration
 from footprintx.integrations.nmap import NmapIntegration
 from footprintx.modules.base import BaseModule
 from footprintx.modules.common import (
+    dns_resolvers,
     locate,
     missing_tool_note,
     resolved_hostnames,
@@ -51,6 +52,7 @@ class PortScanningModule(BaseModule):
     applies_to = HOSTNAME_TYPES | IP_TYPES
     depends_on = ("ip_discovery",)
     integrations = ("nmap", "naabu")
+    options = frozenset({"extra_ports", "max_hosts", "rate", "scanner", "top_ports"})
     active = True
 
     async def run(self, context: ScanContext) -> ModuleResult:
@@ -106,7 +108,8 @@ class PortScanningModule(BaseModule):
             cmd = await run_tool(
                 context, naabu, naabu_path,
                 naabu.port_scan_args(targets_file, top_ports=top_ports, rate=rate,
-                                     raw_sockets=raw_sockets, ports=ports),
+                                     raw_sockets=raw_sockets, ports=ports,
+                                     resolvers=dns_resolvers(context)),
                 "naabu.jsonl", timeout=timeout)
             findings = naabu.parse(cmd.stdout)
             if not cmd.ok and not findings:

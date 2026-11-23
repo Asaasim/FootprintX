@@ -17,6 +17,7 @@ from footprintx.core.models import FindingKind, ModuleResult, ModuleStatus, Targ
 from footprintx.core.process_manager import CommandResult, run_command
 from footprintx.integrations.base import ToolIntegration
 from footprintx.utils.http import Page, fetch_limited
+from footprintx.utils.platform import system_resolvers
 
 if TYPE_CHECKING:
     from footprintx.core.context import ScanContext
@@ -153,6 +154,13 @@ async def fetch_in_scope(
             break
         page = await fetch_limited(client, next_url)
     return page
+
+
+def dns_resolvers(context: ScanContext) -> list[str]:
+    """Resolvers external tools should use: ``modules.dns.resolvers`` if set, else the
+    system's — so every tool sees the same DNS as FootprintX's own lookups."""
+    configured = context.settings.module_config("dns").option("resolvers") or []
+    return [str(r) for r in configured] or system_resolvers()
 
 
 def active_proxy(context: ScanContext) -> str | None:

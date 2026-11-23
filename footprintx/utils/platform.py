@@ -54,6 +54,28 @@ def has_raw_socket_capability(path: str | None) -> bool:
     return False
 
 
+RESOLV_CONF = Path("/etc/resolv.conf")
+
+
+def system_resolvers(resolv_conf: Path = RESOLV_CONF) -> list[str]:
+    """Nameservers the operating system uses (empty if unknown, e.g. on Windows).
+
+    ProjectDiscovery tools (httpx-toolkit, naabu) otherwise resolve names through
+    their own built-in list of *public* resolvers, which can't see internal or
+    split-horizon DNS and silently drops hosts when those resolvers are unreachable.
+    """
+    try:
+        text = resolv_conf.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    servers = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == "nameserver":
+            servers.append(parts[1])
+    return servers
+
+
 def parse_os_release(text: str) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in text.splitlines():

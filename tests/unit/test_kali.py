@@ -49,3 +49,21 @@ def test_resolve_wordlist(tmp_path):
 
 def test_detect_platform_is_cached():
     assert platform_mod.detect_platform() is platform_mod.detect_platform()
+
+
+def test_system_resolvers_and_tool_flags(tmp_path):
+    from footprintx.integrations import INTEGRATION_REGISTRY
+    from footprintx.utils.platform import system_resolvers
+
+    conf = tmp_path / "resolv.conf"
+    conf.write_text("# generated\nsearch lab\nnameserver 10.0.0.2\nnameserver fd00::53\n")
+    assert system_resolvers(conf) == ["10.0.0.2", "fd00::53"]
+    assert system_resolvers(tmp_path / "missing") == []
+
+    args = INTEGRATION_REGISTRY["httpx"].probe_args("in.txt", threads=1, rate=1, timeout=5,
+                                                     resolvers=["10.0.0.2", "fd00::53"])
+    assert args[args.index("-r") + 1] == "10.0.0.2,fd00::53"
+    naabu = INTEGRATION_REGISTRY["naabu"].port_scan_args("t.txt", top_ports=100, rate=10,
+                                                          raw_sockets=False,
+                                                          resolvers=["10.0.0.2"])
+    assert naabu[naabu.index("-r") + 1] == "10.0.0.2"
