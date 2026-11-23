@@ -4,15 +4,16 @@ FootprintX is a cybersecurity reconnaissance tool for digital footprint discover
 
 **One target. One command. Comprehensive reconnaissance.** Full specification: [Spectifications.md](Spectifications.md).
 
-> Only scan targets you are authorised to test. FootprintX asks for confirmation before every scan and keeps all activity inside the targets you give it (see `scope:` in `config/config.yaml`).
+> Only scan targets you are authorised to test. FootprintX asks for confirmation before every scan and keeps all activity inside the targets you give it (or the `--scope` you set — see *Configuration*).
 
 ## New to this? Start here
 
-**[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install on Kali Linux and run your first scan in plain language. In short:
+**[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install on Kali Linux and run your first scan, step by step in plain language. In short:
 
 ```bash
-bash install.sh      # once, on Kali Linux
-footprintx           # answer three questions; the report opens in your browser
+git clone https://github.com/Asaasim/FootprintX.git && cd FootprintX
+bash install.sh      # once, as your normal user (asks for your password)
+footprintx           # in a new terminal: answer three questions; the report opens in your browser
 ```
 
 ## What it does
@@ -34,7 +35,7 @@ Give it a domain, URL, IP address, IP range or a file of targets. FootprintX wor
 
 A failing or missing tool never stops the scan: its step is skipped or falls back, and the report says so. **Passive mode** (`--passive`, or option 2 in the guided mode) uses public sources only and never contacts the target's servers.
 
-Every scan creates `results/<target>/scan_<timestamp>/` with `reports/report.html` (readable summary, security observations ranked by severity, per-host attack-surface map), `report.json`, `report.txt`, `findings.csv`, per-category files (`subdomains.txt`, `open_ports.json`, `shodan_results.json`, …), `scan.log` (including an audit trail of every tool command run) and untouched tool output in `raw/`. Scan history is kept in `results/footprintx.db` (`footprintx history`); each scan is compared with the previous one of the same targets, and anything **new since the last scan** is highlighted.
+Every scan creates `<results>/<target>/scan_<timestamp>/` (`<results>` is `~/FootprintX-results` after `install.sh`, `./results` in Docker or a project checkout) with `reports/report.html` (readable summary, security observations ranked by severity, per-host attack-surface map), `report.json`, `report.txt`, `findings.csv`, per-category files (`subdomains.txt`, `open_ports.json`, `shodan_results.json`, …), `scan.log` (including an audit trail of every tool command run) and untouched tool output in `raw/`. Scan history is kept in `<results>/footprintx.db` (`footprintx history`); each scan is compared with the previous one of the same targets, and anything **new since the last scan** is highlighted.
 
 ## Commands
 
@@ -58,7 +59,19 @@ footprintx history
 
 `bash install.sh` installs the tools from Kali's repositories, installs FootprintX with pipx, creates `~/.config/footprintx/` (settings, `.env` for API keys, default wordlist), adds a menu entry and runs `footprintx doctor`. Options: `WITH_SECLISTS=1` (full SecLists, ~1 GB), `DEV=1` (editable `.venv` install).
 
-Notes: Kali ships ProjectDiscovery's httpx as `httpx-toolkit` (`/usr/bin/httpx` is the Python library) — handled automatically. Kali's nmap has raw-socket capabilities, so SYN scans work without sudo. Results default to `~/FootprintX-results`.
+Notes: Kali ships ProjectDiscovery's httpx as `httpx-toolkit` (`/usr/bin/httpx` is the Python library) — handled automatically. The installer makes sure Kali's nmap has its raw-socket capability, so SYN scans work without sudo. Results default to `~/FootprintX-results`.
+
+Update with `git pull && bash install.sh` in the project folder; uninstall with `pipx uninstall footprintx` (details in the guide).
+
+## Configuration
+
+| File | Used by |
+| --- | --- |
+| `~/.config/footprintx/config.yaml` | Native installs (created by `install.sh`). Takes priority, so results land in the same place whichever folder you start `footprintx` from. |
+| `config/config.yaml` | Docker and development (the project's own copy, fully commented). |
+| `~/.config/footprintx/.env` or `./.env` | API keys such as `SHODAN_API_KEY` — never put keys in `config.yaml`. |
+
+`--config FILE` or `$FOOTPRINTX_CONFIG` overrides the search. Misspelt or unknown settings are reported as warnings (with a "did you mean …?") instead of being silently ignored; `footprintx doctor` shows which file is in use.
 
 ## Docker
 
@@ -73,7 +86,7 @@ docker compose run --rm footprintx scan -t example.com --yes
 docker compose run --rm footprintx scan -l targets/targets.txt --yes   # file in ./targets
 ```
 
-Results go to `./results`; `./config` is mounted read-only; files in `./wordlists` appear at `/app/wordlists/custom`; bulk target files go in `./targets` (gitignored). The container drops all Linux capabilities except `NET_RAW` (for SYN scans). Build args: `INSTALL_AMASS=false` leaves Amass out; `UID=$(id -u)` matches the container user to yours on Linux. To reach Burp/ZAP on the host, set the proxy URL to `http://host.docker.internal:8080`.
+Results go to `./results`; `./config` is mounted read-only; files in `./wordlists` appear at `/app/wordlists/custom`; bulk target files go in `./targets` (gitignored). The container drops all Linux capabilities except `NET_RAW` (for SYN scans). Build args: `docker compose build --build-arg INSTALL_AMASS=false` leaves Amass out; `--build-arg UID=$(id -u)` matches the container user to yours on Linux so the files in `./results` are owned by you. To reach Burp/ZAP on the host, set the proxy URL to `http://host.docker.internal:8080`.
 
 ## Safety and security
 
@@ -103,7 +116,7 @@ Tests also run in the container: `docker compose --profile dev run --rm tests`.
 
 ```bash
 docker compose build footprintx
-FOOTPRINTX_E2E=1 pytest tests/e2e -v      # ~10 minutes
+FOOTPRINTX_E2E=1 pytest tests/e2e -v      # ~5 minutes
 ```
 
 ```text
@@ -112,7 +125,7 @@ footprintx/
 ├── core/             config, targets, scope, scheduler, engine, orchestrator, logging
 ├── modules/          one package per recon step; base.py = BaseModule, common.py = input helpers
 ├── integrations/     wrappers that run external tools / call APIs and parse their output
-├── reporting/        normalise → dedupe → correlate → JSON / HTML / TXT reports
+├── reporting/        normalise → dedupe → correlate → JSON / HTML / TXT / CSV reports
 ├── database/         SQLite scan history
 └── utils/            validators, platform detection, TLS, fingerprints, rate limiting, doctor
 ```
