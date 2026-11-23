@@ -1,9 +1,13 @@
 """Configuration loading (spec §11).
 
 Resolution order: explicit ``--config`` path → ``$FOOTPRINTX_CONFIG`` →
-``./config/config.yaml`` → ``~/.config/footprintx/config.yaml`` → built-in
-defaults. Secrets come from environment variables / ``.env`` files only (``./.env``
-and ``~/.config/footprintx/.env``), never from the YAML file.
+``~/.config/footprintx/config.yaml`` (created by install.sh) →
+``./config/config.yaml`` (project checkout / Docker image) → built-in defaults.
+The personal file wins so results always land in the same place, whichever
+folder ``footprintx`` is started from.
+
+Secrets come from environment variables / ``.env`` files only (``./.env`` and
+``~/.config/footprintx/.env``), never from the YAML file.
 """
 
 from __future__ import annotations
@@ -64,7 +68,7 @@ class ToolsConfig(BaseModel):
 
 class OutputConfig(BaseModel):
     directory: Path = DEFAULT_RESULTS_DIR
-    formats: list[str] = Field(default_factory=lambda: ["json", "html", "txt"])
+    formats: list[str] = Field(default_factory=lambda: ["json", "html", "txt", "csv"])
 
 
 class SafetyConfig(BaseModel):
@@ -113,7 +117,7 @@ def load_settings(path: Path | str | None = None) -> Settings:
             raise ConfigError(f"config file not found: {config_path}")
     else:
         config_path = next(
-            (p for p in (DEFAULT_CONFIG_PATH, USER_CONFIG_PATH) if p.is_file()), None)
+            (p for p in (USER_CONFIG_PATH, DEFAULT_CONFIG_PATH) if p.is_file()), None)
 
     data: Any = {}
     if config_path is not None:

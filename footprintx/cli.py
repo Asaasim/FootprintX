@@ -110,8 +110,8 @@ def main(
     config: Annotated[
         Path | None,
         typer.Option("--config", "-c",
-                     help="Path to config.yaml (default: ./config/config.yaml, then "
-                          "~/.config/footprintx/config.yaml)."),
+                     help="Path to config.yaml (default: ~/.config/footprintx/config.yaml, "
+                          "then ./config/config.yaml)."),
     ] = None,
     version: Annotated[
         bool,

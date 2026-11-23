@@ -67,3 +67,23 @@ def test_system_resolvers_and_tool_flags(tmp_path):
                                                           raw_sockets=False,
                                                           resolvers=["10.0.0.2"])
     assert naabu[naabu.index("-r") + 1] == "10.0.0.2"
+
+
+def test_personal_config_wins_over_project_config(tmp_path, monkeypatch):
+    """After install.sh the terminal is still inside the project folder; results must
+    still go to the folder configured in ~/.config/footprintx/config.yaml."""
+    from footprintx.core import config as cfg
+
+    personal = tmp_path / "home" / "config.yaml"
+    personal.parent.mkdir()
+    personal.write_text("output:\n  directory: /home/kali/FootprintX-results\n")
+    project = tmp_path / "project"
+    (project / "config").mkdir(parents=True)
+    (project / "config" / "config.yaml").write_text("output:\n  directory: ./results\n")
+    monkeypatch.chdir(project)
+    monkeypatch.delenv("FOOTPRINTX_CONFIG", raising=False)
+    monkeypatch.setattr(cfg, "USER_CONFIG_PATH", personal)
+    assert cfg.load_settings().source == personal
+
+    personal.unlink()  # no personal config (Docker, development): project config is used
+    assert cfg.load_settings().source == cfg.DEFAULT_CONFIG_PATH
