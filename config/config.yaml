@@ -68,7 +68,7 @@ tools:
 
 output:
   directory: ./results
-  formats: [json, html, txt]
+  formats: [json, html, txt, csv]
 
 safety:
   require_authorization: true
