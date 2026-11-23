@@ -31,11 +31,11 @@ Give it a domain, URL, IP address, IP range or a file of targets. FootprintX wor
 | Technology fingerprinting + security headers | WhatWeb, httpx-toolkit | native fingerprints |
 | Hidden files & folders (`.git`, `.env`, backups, admin panels) | FFUF, Gobuster | — |
 | Shodan lookups (optional, needs `SHODAN_API_KEY`) | Shodan API | — |
-| Send findings to Burp Suite / ZAP (off by default) | your proxy | — |
+| Send findings to Burp Suite / ZAP, optionally import ZAP's passive-scan alerts (off by default) | your proxy, ZAP API | — |
 
 A failing or missing tool never stops the scan: its step is skipped or falls back, and the report says so. **Passive mode** (`--passive`, or option 2 in the guided mode) uses public sources only and never contacts the target's servers.
 
-Every scan creates `<results>/<target>/scan_<timestamp>/` (`<results>` is `~/FootprintX-results` after `install.sh`, `./results` in Docker or a project checkout) with `reports/report.html` (readable summary, security observations ranked by severity, per-host attack-surface map), `report.json`, `report.txt`, `findings.csv`, per-category files (`subdomains.txt`, `open_ports.json`, `shodan_results.json`, …), `scan.log` (including an audit trail of every tool command run) and untouched tool output in `raw/`. Scan history is kept in `<results>/footprintx.db` (`footprintx history`); each scan is compared with the previous one of the same targets, and anything **new since the last scan** is highlighted.
+Every scan creates `<results>/<target>/scan_<timestamp>/` (`<results>` is `~/FootprintX-results` after `install.sh`, `./results` in Docker or a project checkout) with `reports/report.html` (readable summary, security observations ranked by severity, per-host attack-surface map), `report.json`, `report.txt`, `findings.csv` (add `xml` to `output.formats` for `report.xml`), per-category files (`subdomains.txt`, `open_ports.json`, `shodan_results.json`, …), `scan.log` (including an audit trail of every tool command run) and untouched tool output in `raw/`. Scan history is kept in `<results>/footprintx.db` (`footprintx history`); each scan is compared with the previous one of the same targets, and anything **new since the last scan** is highlighted.
 
 ## Commands
 
@@ -86,7 +86,7 @@ docker compose run --rm footprintx scan -t example.com --yes
 docker compose run --rm footprintx scan -l targets/targets.txt --yes   # file in ./targets
 ```
 
-Results go to `./results`; `./config` is mounted read-only; files in `./wordlists` appear at `/app/wordlists/custom`; bulk target files go in `./targets` (gitignored). The container drops all Linux capabilities except `NET_RAW` (for SYN scans). Build args: `docker compose build --build-arg INSTALL_AMASS=false` leaves Amass out; `--build-arg UID=$(id -u)` matches the container user to yours on Linux so the files in `./results` are owned by you. To reach Burp/ZAP on the host, set the proxy URL to `http://host.docker.internal:8080`.
+Results go to `./results`; `./config` is mounted read-only; files in `./wordlists` appear at `/app/wordlists/custom`; bulk target files go in `./targets` (gitignored). The container drops all Linux capabilities except `NET_RAW` (for SYN scans). Build args: `docker compose build --build-arg INSTALL_AMASS=false` leaves Amass out; `--build-arg UID=$(id -u)` matches the container user to yours on Linux so the files in `./results` are owned by you. To reach Burp/ZAP on the host, set the proxy URL to `http://host.docker.internal:8080`. With `modules.proxy.api: zap`, FootprintX also reads ZAP's passive-scan alerts through its API and adds them to the report as observations (set `ZAP_API_KEY` in `.env` if ZAP's API key is enabled).
 
 ## Safety and security
 
@@ -125,7 +125,7 @@ footprintx/
 ├── core/             config, targets, scope, scheduler, engine, orchestrator, logging
 ├── modules/          one package per recon step; base.py = BaseModule, common.py = input helpers
 ├── integrations/     wrappers that run external tools / call APIs and parse their output
-├── reporting/        normalise → dedupe → correlate → JSON / HTML / TXT / CSV reports
+├── reporting/        normalise → dedupe → correlate → JSON / HTML / TXT / CSV / XML reports
 ├── database/         SQLite scan history
 └── utils/            validators, platform detection, TLS, fingerprints, rate limiting, doctor
 ```

@@ -61,6 +61,9 @@ modules:
     enabled: false
     # From inside Docker, use http://host.docker.internal:8080 to reach Burp/ZAP on the host.
     url: http://127.0.0.1:8080
+    # zap = also import OWASP ZAP's passive-scan alerts via its API (ZAP_API_KEY in .env)
+    api: none              # none | zap
+    zap_wait: 60           # seconds to wait for ZAP's passive scanner to finish
 
 tools:
   # Override where a tool binary is found, e.g.  httpx: /usr/bin/httpx-toolkit
@@ -68,7 +71,7 @@ tools:
 
 output:
   directory: ./results
-  formats: [json, html, txt, csv]
+  formats: [json, html, txt, csv]   # also available: xml
 
 safety:
   require_authorization: true
