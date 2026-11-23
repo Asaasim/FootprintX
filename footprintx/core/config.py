@@ -8,6 +8,7 @@ and ``~/.config/footprintx/.env``), never from the YAML file.
 
 from __future__ import annotations
 
+import difflib
 import os
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,10 @@ DEFAULT_RESULTS_DIR = Path.home() / "FootprintX-results"
 
 class ConfigError(Exception):
     """Raised when the configuration file is missing, malformed or invalid."""
+
+
+class ProjectConfig(BaseModel):
+    name: str = "FootprintX"
 
 
 class ExecutionConfig(BaseModel):
@@ -78,6 +83,7 @@ class LoggingConfig(BaseModel):
 class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    project: ProjectConfig = Field(default_factory=ProjectConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     scope: ScopeConfig = Field(default_factory=ScopeConfig)
     modules: dict[str, ModuleConfig] = Field(default_factory=dict)
@@ -88,6 +94,8 @@ class Settings(BaseModel):
 
     #: File the settings were loaded from (``None`` = built-in defaults).
     source: Path | None = Field(default=None, exclude=True)
+    #: Problems that don't stop a scan, e.g. misspelt keys that are ignored.
+    warnings: list[str] = Field(default_factory=list, exclude=True)
 
     def module_config(self, name: str, enabled_by_default: bool = True) -> ModuleConfig:
         return self.modules.get(name) or ModuleConfig(enabled=enabled_by_default)
@@ -121,7 +129,39 @@ def load_settings(path: Path | str | None = None) -> Settings:
     except ValidationError as exc:
         raise ConfigError(f"{config_path}: {exc}") from exc
     settings.source = config_path
+    settings.warnings = unknown_keys(data)
     return settings
+
+
+def did_you_mean(key: str, valid: list[str]) -> str:
+    match = difflib.get_close_matches(key, valid, n=1, cutoff=0.6)
+    return f" (did you mean {match[0]!r}?)" if match else ""
+
+
+def unknown_keys(data: dict[str, Any]) -> list[str]:
+    """Keys in the config file that FootprintX does not know and silently ignores.
+
+    ``modules.<name>`` entries are checked separately against the module registry
+    (see :func:`footprintx.modules.module_config_warnings`).
+    """
+    sections = {name: info.annotation for name, info in Settings.model_fields.items()
+                if name not in ("source", "warnings")}
+    found: list[str] = []
+    for key, value in data.items():
+        if key not in sections:
+            found.append(f"unknown section {key!r}{did_you_mean(str(key), list(sections))}"
+                         " is ignored")
+            continue
+        model = sections[key]
+        if not (isinstance(value, dict) and isinstance(model, type)
+                and issubclass(model, BaseModel)):
+            continue
+        fields = list(model.model_fields)
+        for sub in value:
+            if sub not in fields:
+                found.append(f"unknown setting '{key}.{sub}'{did_you_mean(str(sub), fields)}"
+                             " is ignored")
+    return found
 
 
 def get_secret(name: str) -> str | None:

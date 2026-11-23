@@ -30,6 +30,7 @@ class ProxyModule(BaseModule):
     applies_to = ALL_TARGET_TYPES
     depends_on = ("http_probe", "web_fuzzing")
     integrations = ()
+    options = frozenset({"route_traffic", "url"})
     enabled_by_default = False
     active = True
 

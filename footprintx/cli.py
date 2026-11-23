@@ -8,6 +8,7 @@ regular commands for scripting: ``scan``, ``doctor``, ``modules list``, ``histor
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import sys
@@ -43,9 +44,10 @@ from footprintx.core.scope_manager import ScopeManager
 from footprintx.core.target_parser import InvalidTargetError, TargetParser
 from footprintx.database.history import list_scans
 from footprintx.database.storage import HISTORY_DB, Storage
-from footprintx.modules import MODULE_REGISTRY
+from footprintx.modules import MODULE_REGISTRY, module_config_warnings
 from footprintx.reporting.correlator import correlate, count_hosts
 from footprintx.utils.dependency_checker import run_doctor
+
 
 def _use_utf8_output() -> None:
     """Make stdout/stderr UTF-8 so progress marks (✔ ✘) and box characters never crash.
@@ -57,10 +59,8 @@ def _use_utf8_output() -> None:
         encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
         if stream is None or encoding == "utf8" or not hasattr(stream, "reconfigure"):
             continue
-        try:
+        with contextlib.suppress(OSError, ValueError):
             stream.reconfigure(encoding="utf-8", errors="replace")
-        except (OSError, ValueError):
-            pass
 
 
 _use_utf8_output()
@@ -126,10 +126,22 @@ def main(
 
 def _settings(ctx: typer.Context) -> Settings:
     try:
-        return load_settings(ctx.obj["config_path"])
+        settings = load_settings(ctx.obj["config_path"])
     except ConfigError as exc:
         err_console.print(f"[red]Configuration error:[/] {escape(str(exc))}")
         raise typer.Exit(2) from exc
+    _print_config_warnings(settings)
+    return settings
+
+
+def _config_warnings(settings: Settings) -> list[str]:
+    return [*settings.warnings, *module_config_warnings(settings)]
+
+
+def _print_config_warnings(settings: Settings) -> None:
+    for warning in _config_warnings(settings):
+        err_console.print(f"[yellow]\\[!] Config {escape(str(settings.source))}:[/] "
+                          f"{escape(warning)}")
 
 
 def _parse_exclude(value: str | None) -> set[str]:
@@ -408,6 +420,13 @@ def _print_result(result: ModuleResult) -> None:
     if result.duration is not None and result.status is not ModuleStatus.SKIPPED:
         line.append(f"  {result.duration:.0f}s", style="dim")
     console.print(line)
+    if result.status is ModuleStatus.SUCCESS:
+        # problems that didn't fail the step (e.g. a range too large to expand)
+        for error in result.errors:
+            console.print(Text(f"     ! {error}", style="yellow"))
+    if result.status is not ModuleStatus.SKIPPED:
+        for note in result.notes:
+            console.print(Text(f"     · {note}", style="dim"))
 
 
 def _print_summary(context: ScanContext) -> None:
@@ -422,8 +441,12 @@ def _print_summary(context: ScanContext) -> None:
                   f"{(context.duration or 0) / 60:.1f} minutes.")
     names = len({f.value for f in findings if f.kind is FindingKind.SUBDOMAIN})
     extra = f" (from {names:,} subdomain names in public sources)" if names > hosts else ""
+    issues = sum(1 for f in observations.values()
+                 if f.data.get("severity") in ("high", "medium", "low"))
+    notes = len(observations) - issues
     console.print(f"  {hosts} hosts{extra} · {len(sites)} live websites · {len(ports)} open "
-                  f"ports · {len(observations)} things worth looking at")
+                  f"ports · {issues} issues worth looking at"
+                  + (f" (+{notes} informational, see the report)" if notes else ""))
     if context.baseline is not None:
         current = {change_key(f.kind.value, f.value, f.target) for f in findings
                    if f.kind in TRACKED_KINDS}
@@ -432,9 +455,12 @@ def _print_summary(context: ScanContext) -> None:
         console.print(f"  [{style}]{new} new since the last scan of these targets[/]")
 
     order = {"high": 0, "medium": 1, "low": 2, "info": 3}
-    top = sorted(observations.values(),
-                 key=lambda f: order.get(f.data.get("severity", "info"), 4))[:10]
-    important = [f for f in top if f.data.get("severity") in ("high", "medium", "low")]
+    important = sorted((f for f in observations.values()
+                        if f.data.get("severity") in ("high", "medium", "low")),
+                       key=lambda f: order.get(f.data.get("severity", "info"), 4))
+    if len(important) > 10:
+        console.print(f"  [dim]Showing the 10 most important of {len(important)} issues.[/]")
+        important = important[:10]
     if important:
         table = Table(title="Most important observations", title_justify="left",
                       show_lines=False)
@@ -491,6 +517,8 @@ def doctor(ctx: typer.Context) -> None:
         settings, config_error = Settings(), str(exc)
 
     results = run_doctor(settings, config_error)
+    if config_error is None:
+        _print_config_warnings(settings)
     table = Table(show_header=False, box=None, pad_edge=False)
     for r in results:
         mark = Text("[+]", style="green") if r.ok else Text("[-]", style="red")
@@ -544,10 +572,26 @@ def history(
         console.print("No scans recorded yet in " + escape(str(db.parent)) + ".")
         return
     table = Table(title="Previous scans", title_justify="left")
-    for col in ("When (UTC)", "Targets", "Status", "Findings", "Issues", "Report"):
-        table.add_column(col, overflow="fold")
-    for s in scans:
-        table.add_row(str(s["started_at"])[:16].replace("T", " "), Text(s["targets"] or ""),
-                      s["status"], str(s["findings"]), str(s["observations"]),
-                      Text(str(Path(s["output_dir"]) / "reports" / "report.html")))
+    table.add_column("#", justify="right", no_wrap=True)
+    table.add_column("When (UTC)", no_wrap=True)
+    table.add_column("Targets", overflow="fold")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Findings", justify="right", no_wrap=True)
+    table.add_column("Issues", justify="right", no_wrap=True)
+    for i, s in enumerate(scans, start=1):
+        table.add_row(str(i), str(s["started_at"])[:16].replace("T", " "),
+                      Text(s["targets"] or ""), s["status"], str(s["findings"]),
+                      str(s["observations"]))
     console.print(table)
+    console.print("\n[bold]Reports[/]")
+    for i, s in enumerate(scans, start=1):
+        report = _display_path(Path(s["output_dir"]) / "reports" / "report.html")
+        console.print(Text(f"  {i:>2}  {report}", overflow="fold"))
+
+
+def _display_path(path: Path) -> str:
+    """``path`` relative to the current directory when it is inside it (shorter)."""
+    try:
+        return str(path.resolve().relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(path)

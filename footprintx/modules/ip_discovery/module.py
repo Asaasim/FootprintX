@@ -50,6 +50,7 @@ class IpDiscoveryModule(BaseModule):
     applies_to = ALL_TARGET_TYPES
     depends_on = ("dns",)
     integrations = ("nmap",)
+    options = frozenset({"max_range_hosts"})
 
     async def run(self, context: ScanContext) -> ModuleResult:
         result = ModuleResult(self.name, ModuleStatus.SUCCESS)

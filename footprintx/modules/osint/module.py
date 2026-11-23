@@ -43,6 +43,7 @@ class OsintModule(BaseModule):
     applies_to = HOSTNAME_TYPES | {TargetType.IPV4, TargetType.IPV6}
     depends_on = ()
     integrations = ("rdap", "theharvester")
+    options = frozenset({"harvester_sources", "harvester_timeout"})
 
     async def run(self, context: ScanContext) -> ModuleResult:
         domains = sorted({_registered(t.value) for t in context.targets

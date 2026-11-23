@@ -27,6 +27,9 @@ class BaseModule(ABC):
     depends_on: ClassVar[tuple[str, ...]] = ()
     #: Integration names (see ``footprintx.integrations``) this module can use.
     integrations: ClassVar[tuple[str, ...]] = ()
+    #: Option names read from ``modules.<name>`` (besides ``enabled``); anything
+    #: else in the config file is reported as an unknown setting.
+    options: ClassVar[frozenset[str]] = frozenset()
     #: Used when the config file does not mention this module.
     enabled_by_default: ClassVar[bool] = True
     #: Sends traffic to the targets themselves (skipped in passive mode).

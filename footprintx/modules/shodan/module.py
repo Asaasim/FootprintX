@@ -34,6 +34,7 @@ class ShodanModule(BaseModule):
     applies_to = HOSTNAME_TYPES | IP_TYPES
     depends_on = ("ip_discovery",)
     integrations = ("shodan",)
+    options = frozenset({"max_ips", "rate"})
 
     async def run(self, context: ScanContext) -> ModuleResult:
         shodan = INTEGRATION_REGISTRY["shodan"]

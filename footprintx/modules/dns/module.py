@@ -53,6 +53,7 @@ class DnsModule(BaseModule):
     applies_to = HOSTNAME_TYPES | {TargetType.URL}
     depends_on = ("subdomains", "osint")
     integrations = ()
+    options = frozenset({"concurrency", "max_hosts", "record_types", "resolvers"})
     #: Lookups that timed out or were refused during the current run.
     failed_lookups: int = 0
 

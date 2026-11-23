@@ -48,6 +48,7 @@ class TechnologyDetectionModule(BaseModule):
     applies_to = ALL_TARGET_TYPES
     depends_on = ("http_probe",)
     integrations = ("whatweb", "httpx")
+    options = frozenset({"max_urls"})
     active = True
 
     async def run(self, context: ScanContext) -> ModuleResult:

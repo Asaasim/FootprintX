@@ -38,6 +38,7 @@ class SubdomainModule(BaseModule):
     applies_to = frozenset({TargetType.DOMAIN})
     depends_on = ()
     integrations = ("subfinder", "assetfinder", "findomain", "amass", "crtsh")
+    options = frozenset({"source_timeout", "sources"})
 
     async def run(self, context: ScanContext) -> ModuleResult:
         result = ModuleResult(self.name)
