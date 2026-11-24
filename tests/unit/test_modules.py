@@ -319,3 +319,83 @@ def test_cloudflare_edge_ports_are_labelled_not_reported_as_the_orgs():
     assert "cdn" not in ports[1].data
     titles = [o.value for o in PortScanningModule()._observations(ports)]
     assert titles == ["MySQL exposed"]  # the real server's issue is still reported
+
+
+async def test_dns_dropped_lookups_are_asked_again(tmp_path, monkeypatch):
+    """A busy router/WSL DNS relay drops lookups; a second try must find the host."""
+    import dns.asyncresolver
+    import dns.exception
+    import dns.resolver
+
+    class Answer(list):
+        rrset = type("R", (), {"ttl": 60})()
+
+    class Record:
+        def to_text(self):
+            return "192.0.2.10"
+
+    asked: dict[tuple[str, str], int] = {}
+
+    async def flaky_resolve(self, name, rtype, raise_on_no_answer=False):
+        key = (str(name), rtype)
+        asked[key] = asked.get(key, 0) + 1
+        if name == "www.example.com" and rtype == "A":
+            if asked[key] == 1:
+                raise dns.exception.Timeout
+            return Answer([Record()])
+        raise dns.resolver.NXDOMAIN
+
+    monkeypatch.setattr(dns.asyncresolver.Resolver, "resolve", flaky_resolve)
+    ctx = make_context(tmp_path, passive=True)
+    add_result(ctx, "subdomains", Finding(FindingKind.SUBDOMAIN, "www.example.com", "t"))
+    result = await DnsModule(ModuleConfig()).run(ctx)
+
+    assert ("www.example.com", "192.0.2.10") in {
+        (f.target, f.value) for f in result.findings if f.kind is FindingKind.IP_ADDRESS}
+    assert not any("timed out" in n for n in result.notes)
+
+
+def test_names_on_the_same_server_are_scanned_once(tmp_path):
+    from footprintx.modules.port_scanning.module import _for_every_name, _group_by_server
+
+    ctx = make_context(tmp_path)
+    add_result(ctx, "dns", *(
+        Finding(FindingKind.IP_ADDRESS, ip, "dns", host, {"hostnames": [host]})
+        for host, ip in (("example.com", "192.0.2.1"), ("www.example.com", "192.0.2.1"),
+                         ("mail.example.com", "192.0.2.2"))))
+    groups = _group_by_server(ctx, ["example.com", "www.example.com", "mail.example.com"])
+    assert groups == {"example.com": ["example.com", "www.example.com"],
+                      "mail.example.com": ["mail.example.com"]}
+
+    port = Finding(FindingKind.OPEN_PORT, "example.com:22/tcp", "nmap", "example.com",
+                   {"host": "example.com", "ip": "192.0.2.1", "port": 22, "protocol": "tcp"})
+    ports = _for_every_name([port], groups)
+    assert [(f.value, f.target) for f in ports] == [
+        ("example.com:22/tcp", "example.com"), ("www.example.com:22/tcp", "www.example.com")]
+
+
+async def test_dns_blocked_txt_lookups_are_asked_over_https(tmp_path, monkeypatch):
+    """Networks that block TXT lookups must not hide SPF/DMARC."""
+    import dns.asyncresolver
+    import dns.exception
+    import dns.resolver
+
+    from footprintx.modules.dns import module
+
+    async def txt_blocked(self, name, rtype, raise_on_no_answer=False):
+        if rtype == "TXT":
+            raise dns.exception.Timeout
+        raise dns.resolver.NXDOMAIN
+
+    async def over_https(name, rtype):
+        assert rtype == "TXT"
+        return [('"v=spf1 -all"', 60)] if name == "example.com" else []
+
+    monkeypatch.setattr(dns.asyncresolver.Resolver, "resolve", txt_blocked)
+    monkeypatch.setattr(module, "doh_lookup", over_https)
+    result = await DnsModule(ModuleConfig()).run(make_context(tmp_path, passive=True))
+
+    titles = {f.value for f in result.findings if f.kind is FindingKind.OBSERVATION}
+    assert "No DMARC record" in titles and "No SPF record" not in titles
+    assert any("asked over HTTPS" in n for n in result.notes)
+    assert not any("could not be checked" in n for n in result.notes)

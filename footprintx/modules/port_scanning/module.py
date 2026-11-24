@@ -23,6 +23,7 @@ from footprintx.integrations.nmap import NmapIntegration
 from footprintx.modules.base import BaseModule
 from footprintx.modules.common import (
     dns_resolvers,
+    host_addresses,
     locate,
     missing_tool_note,
     most_relevant_first,
@@ -33,6 +34,7 @@ from footprintx.modules.common import (
 )
 from footprintx.utils.cdn import cdn_for_ip
 from footprintx.utils.platform import detect_platform, has_raw_socket_capability
+from footprintx.utils.wsl import is_wsl1
 
 if TYPE_CHECKING:
     from footprintx.core.context import ScanContext
@@ -48,6 +50,29 @@ RISKY_SERVICES = {
 }
 
 
+def _group_by_server(context: ScanContext, names: list[str]) -> dict[str, list[str]]:
+    """``{first name: [all names resolving to exactly the same addresses]}``."""
+    addresses = host_addresses(context)
+    groups: dict[frozenset[str], list[str]] = {}
+    for name in names:
+        groups.setdefault(frozenset(addresses.get(name) or {name}), []).append(name)
+    return {members[0]: members for members in groups.values()}
+
+
+def _for_every_name(ports: list[Finding], same_server: dict[str, list[str]]) -> list[Finding]:
+    """Repeat a server's ports for the other names pointing at it."""
+    found = []
+    for f in ports:
+        host = str(f.data["host"])
+        found.append(f)
+        for name in same_server.get(host, [host]):
+            if name != host:
+                found.append(Finding(
+                    f.kind, f"{name}:{f.data['port']}/{f.data['protocol']}", f.source, name,
+                    {**f.data, "host": name}))
+    return found
+
+
 class PortScanningModule(BaseModule):
     name = "port_scanning"
     description = "Find open ports and identify the services and versions behind them."
@@ -59,16 +84,24 @@ class PortScanningModule(BaseModule):
     active = True
 
     async def run(self, context: ScanContext) -> ModuleResult:
-        targets = most_relevant_first(context, [*resolved_hostnames(context), *scan_ips(context)])
+        names = most_relevant_first(context, [*resolved_hostnames(context), *scan_ips(context)])
+        # Dozens of names often point at the same server: scan it once, under the first
+        # name, and report the result for all of them.
+        same_server = _group_by_server(context, names)
+        targets = list(same_server)
         max_hosts = int(self.config.option("max_hosts", 256))
         if not targets:
             return skipped(self.name, "no resolved hosts or in-scope IPs to scan")
 
         result = ModuleResult(self.name, ModuleStatus.SUCCESS)
         if len(targets) > max_hosts:
-            result.notes.append(f"{len(targets)} hosts found; scanning the first {max_hosts} "
+            result.notes.append(f"{len(targets)} servers found; scanning the first {max_hosts} "
                                 "(raise modules.port_scanning.max_hosts to scan more)")
             targets = targets[:max_hosts]
+        shared = sum(len(same_server[t]) - 1 for t in targets)
+        if shared:
+            result.notes.append(f"{shared} names share a server with another name; each "
+                                "server was scanned once")
 
         top_ports = int(self.config.option("top_ports", 1000))
         targets_file = str(context.save_raw("port_scan_targets.txt", "\n".join(targets) + "\n"))
@@ -80,7 +113,8 @@ class PortScanningModule(BaseModule):
         naabu_path = locate(context, naabu) if scanner in ("auto", "naabu") else None
         timeout = context.settings.execution.module_timeout
         scanner_path = nmap_path or naabu_path
-        raw_sockets = detect_platform().can_raw_scan or has_raw_socket_capability(scanner_path)
+        raw_sockets = not is_wsl1() and (
+            detect_platform().can_raw_scan or has_raw_socket_capability(scanner_path))
 
         # Top N ports by frequency PLUS every risky-service port: several of the most
         # dangerous services (Redis, MongoDB, Elasticsearch) are outside nmap's top 1000.
@@ -122,8 +156,12 @@ class PortScanningModule(BaseModule):
         else:
             return skipped(self.name, f"{missing_tool_note(nmap)}; {missing_tool_note(naabu)}")
 
-        if not raw_sockets:
+        if is_wsl1():
+            result.notes.append("slower port scan used: this is WSL 1 (upgrade with "
+                                "'wsl --set-version <name> 2' in Windows)")
+        elif not raw_sockets:
             result.notes.append("TCP connect scan used (run with sudo for faster SYN scans)")
+        findings = _for_every_name(findings, same_server)
         result.findings = [f for f in findings if context.scope.is_in_scope(f.data["host"])]
         cdn_hosts = self._label_cdn_ports(result.findings)
         if cdn_hosts:

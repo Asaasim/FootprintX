@@ -43,7 +43,7 @@ class NmapIntegration(ToolIntegration):
         return [
             "-sS" if raw_sockets else "-sT",
             *(["-sV", "--version-light"] if service_detection else []),
-            "-Pn", "-T4", "--open", *port_args,
+            "-Pn", "-n", "-T4", "--open", *port_args,  # -n: no reverse DNS, we do our own
             "--host-timeout", host_timeout,
             "-iL", targets_file, "-oX", xml_out,
         ]
