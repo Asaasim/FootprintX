@@ -38,7 +38,9 @@ def render_text_report(data: dict[str, Any], *, full: bool = True) -> str:
         "Targets:    " + ", ".join(t["value"] for t in data["targets"]),
         "",
         f"Hosts: {summary['hosts']}   Subdomain names found: {summary['names_discovered']}   "
-        f"Live websites: {summary['live_websites']}   Open ports: {summary['open_ports']}",
+        f"Live websites: {summary['live_websites']}   Open ports: {summary['open_ports']}"
+        + (f" (+{summary['cdn_edge_ports']} on CDN servers, not the organisation's)"
+           if summary.get("cdn_edge_ports") else ""),
         f"Observations: {obs['high']} high, {obs['medium']} medium, "
         f"{obs['low']} low, {obs['info']} info",
     ]

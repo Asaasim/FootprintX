@@ -476,7 +476,8 @@ def _print_summary(context: ScanContext) -> None:
     findings = context.findings()
     hosts = count_hosts(correlate(context.targets, findings))
     sites = {f.value for f in findings if f.kind is FindingKind.URL and f.data.get("live")}
-    ports = {f.value for f in findings if f.kind is FindingKind.OPEN_PORT}
+    ports = {f.value for f in findings if f.kind is FindingKind.OPEN_PORT
+             and not f.data.get("cdn")}  # a CDN's ports aren't the organisation's
     observations = {(f.value, f.target): f for f in findings
                     if f.kind is FindingKind.OBSERVATION}
 

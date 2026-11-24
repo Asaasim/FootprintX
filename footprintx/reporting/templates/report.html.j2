@@ -73,7 +73,7 @@
     <div class="card"><b>{{ "{:,}".format(s.names_discovered) }}</b><span>subdomain names in public sources</span></div>
     {% endif %}
     <div class="card"><b>{{ s.live_websites }}</b><span>live websites</span></div>
-    <div class="card"><b>{{ s.open_ports }}</b><span>open ports</span></div>
+    <div class="card"><b>{{ s.open_ports }}</b><span>open ports{% if s.cdn_edge_ports %} (+{{ s.cdn_edge_ports }} on CDN servers){% endif %}</span></div>
     <div class="card"><b style="color:var(--high)">{{ s.observations.high }}</b><span>high-severity issues</span></div>
     <div class="card"><b style="color:var(--medium)">{{ s.observations.medium }}</b><span>medium issues</span></div>
     <div class="card"><b>{{ s.observations.low + s.observations.info }}</b><span>low / informational</span></div>

@@ -295,3 +295,27 @@ async def test_directory_listing_detected_on_fuzzed_directories(tmp_path, monkey
         endpoints, make_context(tmp_path))
     assert [(f.value, f.target, f.data["severity"]) for f in found] == [
         ("Directory listing enabled", "https://example.com/files/", "medium")]
+
+
+def test_cloudflare_edge_ports_are_labelled_not_reported_as_the_orgs():
+    from footprintx.core.models import Finding, FindingKind
+    from footprintx.modules.port_scanning.module import PortScanningModule
+    from footprintx.utils.cdn import cdn_for_ip
+
+    assert cdn_for_ip("104.16.1.1") == "Cloudflare"
+    assert cdn_for_ip("2606:4700::1") == "Cloudflare"
+    assert cdn_for_ip("203.0.113.5") is None and cdn_for_ip("nonsense") is None
+
+    def port(host, ip, number, service):
+        return Finding(FindingKind.OPEN_PORT, f"{host}:{number}/tcp", "nmap", host,
+                       {"host": host, "ip": ip, "port": number, "protocol": "tcp",
+                        "service": service})
+
+    ports = [port("www.example.com", "104.16.1.1", 8443, "https-alt"),
+             port("db.example.com", "203.0.113.5", 3306, "mysql")]
+    hosts = PortScanningModule._label_cdn_ports(ports)
+    assert hosts == {"www.example.com": "Cloudflare"}
+    assert ports[0].data["cdn"] == "Cloudflare" and "Cloudflare edge" in ports[0].data["service"]
+    assert "cdn" not in ports[1].data
+    titles = [o.value for o in PortScanningModule()._observations(ports)]
+    assert titles == ["MySQL exposed"]  # the real server's issue is still reported

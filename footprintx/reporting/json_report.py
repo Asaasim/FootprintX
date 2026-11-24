@@ -75,7 +75,11 @@ def build_report_data(context: ScanContext, findings: list[Finding]) -> dict[str
                                      if f.kind is FindingKind.SUBDOMAIN}),
             "live_websites": len([f for f in findings
                                   if f.kind is FindingKind.URL and f.data.get("live")]),
-            "open_ports": len(by_kind.get(FindingKind.OPEN_PORT.value, [])),
+            # CDN edge ports (e.g. Cloudflare's) aren't the organisation's own open ports
+            "open_ports": len([f for f in findings if f.kind is FindingKind.OPEN_PORT
+                               and not f.data.get("cdn")]),
+            "cdn_edge_ports": len([f for f in findings if f.kind is FindingKind.OPEN_PORT
+                                   and f.data.get("cdn")]),
             "modules_succeeded": statuses[ModuleStatus.SUCCESS],
             "modules_failed": statuses[ModuleStatus.FAILED],
             "modules_skipped": statuses[ModuleStatus.SKIPPED],

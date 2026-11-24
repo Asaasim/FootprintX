@@ -31,6 +31,7 @@ from footprintx.modules.common import (
     scan_ips,
     skipped,
 )
+from footprintx.utils.cdn import cdn_for_ip
 from footprintx.utils.platform import detect_platform, has_raw_socket_capability
 
 if TYPE_CHECKING:
@@ -124,12 +125,37 @@ class PortScanningModule(BaseModule):
         if not raw_sockets:
             result.notes.append("TCP connect scan used (run with sudo for faster SYN scans)")
         result.findings = [f for f in findings if context.scope.is_in_scope(f.data["host"])]
+        cdn_hosts = self._label_cdn_ports(result.findings)
+        if cdn_hosts:
+            result.notes.append(
+                f"{len(cdn_hosts)} host(s) are behind Cloudflare: their open ports belong to "
+                "Cloudflare's servers, not the organisation's, and are labelled as such")
         result.findings += self._observations(result.findings)
+        result.findings += [observation(
+            f"Behind {cdn} (CDN)", host, self.name, "info",
+            f"{host} is served through {cdn}. The ports found on it are {cdn}'s, not the "
+            "organisation's own server; the real server's address is hidden.")
+            for host, cdn in sorted(cdn_hosts.items())]
         return result
+
+    @staticmethod
+    def _label_cdn_ports(ports: list[Finding]) -> dict[str, str]:
+        """Mark ports answered by a CDN edge server; returns ``{host: cdn}``."""
+        hosts: dict[str, str] = {}
+        for f in ports:
+            cdn = cdn_for_ip(f.data.get("ip"))
+            if cdn:
+                f.data["cdn"] = cdn
+                service = f.data.get("service") or "port"
+                f.data["service"] = f"{service}, {cdn} edge"
+                hosts[str(f.data["host"])] = cdn
+        return hosts
 
     def _observations(self, ports: list[Finding]) -> list[Finding]:
         found = []
         for f in ports:
+            if f.data.get("cdn"):
+                continue  # a CDN's port, not the organisation's service
             risky = RISKY_SERVICES.get(int(f.data.get("port", 0)))
             if risky:
                 service, severity = risky
