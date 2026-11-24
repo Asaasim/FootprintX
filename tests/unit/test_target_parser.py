@@ -35,7 +35,7 @@ def test_parse_valid(parser, raw, expected_type, expected_value):
 @pytest.mark.parametrize(
     "raw",
     ["", "   ", "localhost", "not a domain", "-bad-.com", "999.1.1.1",
-     "ftp://example.com", "example.com/path", "https://", "10.0.0.0/33"],
+     "ftp://example.com", "https://", "10.0.0.0/33"],
 )
 def test_parse_invalid(parser, raw):
     with pytest.raises(InvalidTargetError):
@@ -52,3 +52,26 @@ def test_read_file_skips_blanks_and_comments(tmp_path):
     f = tmp_path / "targets.txt"
     f.write_text("# authorised targets\nexample.com\n\n  10.0.0.1  \n", encoding="utf-8")
     assert TargetParser.read_file(f) == ["example.com", "10.0.0.1"]
+
+
+def test_forgiving_input_that_people_paste():
+    p = TargetParser()
+    assert p.parse("*.example.com").value == "example.com"
+    assert p.parse(".example.com").value == "example.com"
+    assert p.parse("example.com/").value == "example.com"
+    assert p.parse("Example.com/login").value == "https://example.com/login"
+    assert p.parse('"example.com"').value == "example.com"
+    assert p.parse("<https://example.com>").value == "https://example.com/"
+    with pytest.raises(InvalidTargetError, match="email"):
+        p.parse("admin@example.com")
+
+
+def test_target_files_saved_on_windows(tmp_path):
+    expected = ["a.example", "b.example", "c.example", "https://d.example/#top"]
+    text = "# list\r\na.example, b.example\r\nc.example  # main site\r\nhttps://d.example/#top\r\n"
+    for name, data in (("bom.txt", b"\xef\xbb\xbf" + text.encode()),
+                       ("utf16.txt", text.encode("utf-16")),
+                       ("plain.txt", text.encode())):
+        f = tmp_path / name
+        f.write_bytes(data)
+        assert TargetParser.read_file(f) == expected, name

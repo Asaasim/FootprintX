@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -18,15 +19,44 @@ _extract = tldextract.TLDExtract(suffix_list_urls=())
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
+_COMMENT = re.compile(r"(^|\s)#.*")
+
+
+def _looks_like_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _read_text(path: Path) -> str:
+    data = path.read_bytes()
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):  # UTF-16 byte-order marks
+        return data.decode("utf-16")
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("latin-1")
+
+
 class InvalidTargetError(ValueError):
     """The input could not be recognised as a supported target type."""
 
 
 class TargetParser:
     def parse(self, raw: str) -> Target:
-        value = raw.strip()
+        # Forgive what people commonly paste: quotes, <brackets>, "*." scope wildcards.
+        value = raw.strip().strip("\"'<>").strip()
+        if value.startswith("*."):
+            value = value[2:]
+        elif value.startswith(".") and not value.startswith(".."):
+            value = value[1:]
         if not value:
             raise InvalidTargetError("empty target")
+        if "@" in value and "://" not in value:
+            raise InvalidTargetError("that looks like an email address — type just the part "
+                                     "after the @, e.g. example.com")
 
         if "://" in value:
             return Target(self._normalise_url(value), TargetType.URL, raw)
@@ -40,13 +70,19 @@ class TargetParser:
             return Target(ip.compressed, kind, raw)
 
         if "/" in value:
-            try:
-                network = ipaddress.ip_network(value, strict=False)
-            except ValueError as exc:
-                raise InvalidTargetError(
-                    "not a valid CIDR range (for URLs include the scheme, e.g. https://)"
-                ) from exc
-            return Target(network.compressed, TargetType.CIDR, raw)
+            host, _, path = value.partition("/")
+            if not _looks_like_ip(host):
+                # "example.com/" or "example.com/login" without http(s)://
+                if path.strip("/"):
+                    return Target(self._normalise_url(f"https://{value}"), TargetType.URL, raw)
+                value = host
+            else:
+                try:
+                    network = ipaddress.ip_network(value, strict=False)
+                except ValueError as exc:
+                    raise InvalidTargetError("not a valid IP range (e.g. 192.168.1.0/24)"
+                                             ) from exc
+                return Target(network.compressed, TargetType.CIDR, raw)
 
         host = self._normalise_hostname(value)
         return Target(host, self._hostname_type(host), raw)
@@ -69,9 +105,15 @@ class TargetParser:
 
     @staticmethod
     def read_file(path: Path) -> list[str]:
-        """One target per line; blank lines and ``#`` comments are ignored."""
-        lines = (line.strip() for line in path.read_text(encoding="utf-8").splitlines())
-        return [line for line in lines if line and not line.startswith("#")]
+        """Targets from a text file: one or more per line (separated by spaces, commas or
+        semicolons); blank lines and ``#`` comments are ignored. Files saved on Windows
+        (byte-order mark, UTF-16 "Unicode", CRLF line endings) work too."""
+        targets: list[str] = []
+        for line in _read_text(path).splitlines():
+            # "#" starts a comment at the line start or after a space (not a URL's #fragment)
+            line = _COMMENT.sub("", line)
+            targets += [v for v in re.split(r"[\s,;]+", line) if v]
+        return targets
 
     # -- helpers -----------------------------------------------------------
 
