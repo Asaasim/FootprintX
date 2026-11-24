@@ -70,17 +70,18 @@ class Orchestrator:
         on_result: ResultCallback | None = None,
         on_start: StartCallback | None = None,
         passive: bool = False,
+        profile: str = "quick",
     ) -> ScanContext:
         """Run a full scan. Reports and scan_info.json are written even if interrupted."""
         output_root = output_root.expanduser()
         label = safe_dirname(targets[0].value) if len(targets) == 1 else "multi_target"
         output_dir = unique_session_dir(output_root / label)
         context = ScanContext(output_dir.name, output_dir, self.settings, scope, targets,
-                              passive=passive)
+                              passive=passive, profile=profile)
 
         try:
             context.baseline = previous_scan(Storage(output_root / HISTORY_DB),
-                                             [t.value for t in targets], passive)
+                                             [t.value for t in targets], context.mode)
         except Exception:  # noqa: BLE001 — change detection is a convenience, never fatal
             log.exception("Could not read scan history")
 
@@ -133,7 +134,7 @@ class Orchestrator:
             "version": __version__,
             "session_id": context.session_id,
             "status": context.status,
-            "mode": "passive" if context.passive else "full",
+            "mode": context.mode,
             "started_at": context.started_at.isoformat(),
             "finished_at": context.finished_at.isoformat() if context.finished_at else None,
             "duration": context.duration,

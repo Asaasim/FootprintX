@@ -41,7 +41,7 @@ class Storage:
                 (context.session_id, context.started_at.isoformat(),
                  context.finished_at.isoformat() if context.finished_at else None,
                  context.status, str(context.output_dir.resolve()),
-                 "passive" if context.passive else "full"))
+                 context.mode))
             conn.executemany(
                 "INSERT OR IGNORE INTO scan_targets (scan_id, value, type) VALUES (?, ?, ?)",
                 [(context.session_id, t.value, t.type.value) for t in context.targets])

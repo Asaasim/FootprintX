@@ -22,11 +22,18 @@ class ScanContext:
     results: dict[str, ModuleResult] = field(default_factory=dict)
     #: Passive mode: only public sources, no traffic to the targets themselves.
     passive: bool = False
+    #: Scan depth: "quick" or "thorough" (see footprintx.core.profiles).
+    profile: str = "quick"
     #: Previous completed scan of the same targets, for "new since last scan".
     baseline: Baseline | None = None
     status: str = "pending"
     started_at: datetime = field(default_factory=utc_now)
     finished_at: datetime | None = None
+
+    @property
+    def mode(self) -> str:
+        """How the scan was run: "passive", "quick" or "thorough"."""
+        return "passive" if self.passive else self.profile
 
     @property
     def raw_dir(self) -> Path:

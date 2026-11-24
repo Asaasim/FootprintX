@@ -63,8 +63,8 @@ async def test_passive_and_full_scans_are_not_compared(tmp_path):
     scope = ScopeManager(["example.com"])
     await Orchestrator(Settings(), {"subdomains": finder("a.example.com")}).run(
         [TARGET], scope, tmp_path, passive=True)
-    assert previous_scan(Storage(tmp_path / HISTORY_DB), ["example.com"], passive=False) is None
-    assert previous_scan(Storage(tmp_path / HISTORY_DB), ["example.com"], passive=True)
+    assert previous_scan(Storage(tmp_path / HISTORY_DB), ["example.com"], "quick") is None
+    assert previous_scan(Storage(tmp_path / HISTORY_DB), ["example.com"], "passive")
 
 
 def test_history_db_from_v1_schema_is_migrated(tmp_path):

@@ -18,6 +18,10 @@ scope:
   include: []
   exclude: []
 
+# The limits below are used as written by THOROUGH scans (--profile thorough, or option 2
+# in the guided mode). QUICK scans (the default) use tighter limits for speed: top 100
+# ports on up to 50 hosts, a short built-in wordlist on 3 websites, 3-minute source
+# timeouts (see footprintx/core/profiles.py). Both grow with the number of domains.
 modules:
   subdomains:
     enabled: true

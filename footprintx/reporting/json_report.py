@@ -61,7 +61,7 @@ def build_report_data(context: ScanContext, findings: list[Finding]) -> dict[str
         "version": __version__,
         "session_id": context.session_id,
         "status": context.status,
-        "mode": "passive" if context.passive else "full",
+        "mode": context.mode,
         "started_at": context.started_at.isoformat(),
         "finished_at": context.finished_at.isoformat() if context.finished_at else None,
         "duration": context.duration,

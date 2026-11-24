@@ -39,6 +39,7 @@ from footprintx.core.models import (
     change_key,
 )
 from footprintx.core.orchestrator import Orchestrator
+from footprintx.core.profiles import DEFAULT_PROFILE, PROFILES, apply_profile
 from footprintx.core.scheduler import ExecutionPlan
 from footprintx.core.scope_manager import ScopeManager
 from footprintx.core.target_parser import InvalidTargetError, TargetParser
@@ -192,14 +193,23 @@ def guided(ctx: typer.Context) -> None:
     console.print("   Targets: " + ", ".join(f"[cyan]{t.value}[/]" for t in targets))
 
     console.print("\n[bold]2. What kind of scan?[/]\n"
-                  "   [cyan]1[/]  Full scan    — everything: also probes websites, scans "
-                  "ports and looks for hidden files.\n"
-                  "   [cyan]2[/]  Passive scan — public sources only; nothing is sent to the "
+                  "   [cyan]1[/]  Quick scan    — the most important findings: websites, the "
+                  "main ports and\n"
+                  "                    commonly exposed files. Usually 5–15 minutes per domain. "
+                  "[green](recommended)[/]\n"
+                  "   [cyan]2[/]  Thorough scan — 1,000 ports and a much bigger search for "
+                  "hidden files.\n"
+                  "                    Can take an hour or more per domain.\n"
+                  "   [cyan]3[/]  Passive scan  — public sources only; nothing is sent to the "
                   "target's own servers.")
-    passive = Prompt.ask("   [bold]Choose[/]", choices=["1", "2"], default="1") == "2"
+    choice = Prompt.ask("   [bold]Choose[/]", choices=["1", "2", "3"], default="1")
+    passive = choice == "3"
+    profile = "thorough" if choice == "2" else "quick"
+    apply_profile(settings, profile, targets)
 
     console.print()
-    context = _run_scan(settings, targets, settings.output.directory, set(), passive)
+    context = _run_scan(settings, targets, settings.output.directory, set(), passive,
+                        profile)
     report = context.reports_dir / "report.html" if context else None
     if report and report.is_file() and _can_open_browser() and \
             Confirm.ask("\nOpen the report in your web browser now?", default=True):
@@ -245,6 +255,12 @@ def scan(
     passive: Annotated[
         bool, typer.Option("--passive", help="Public sources only; don't contact the targets.")
     ] = False,
+    profile: Annotated[
+        str,
+        typer.Option("--profile", "-p",
+                     help="Scan depth: 'quick' (minutes; top 100 ports, short wordlist) or "
+                          "'thorough' (top 1000 ports, full wordlist; can take an hour+)."),
+    ] = DEFAULT_PROFILE,
     scope: Annotated[
         list[str] | None,
         typer.Option("--scope", "-s",
@@ -276,7 +292,9 @@ def scan(
     settings = _settings(ctx)
     setup_logging("DEBUG" if verbose else "ERROR")
     excluded = _parse_exclude(exclude)
-    _apply_overrides(settings, scope, wordlist, allow_internal)
+    profile = profile.strip().lower()
+    if profile not in PROFILES:
+        raise typer.BadParameter(f"choose from {', '.join(PROFILES)}", param_hint="'--profile'")
 
     raw = list(target or [])
     if target_list is not None:
@@ -292,13 +310,15 @@ def scan(
         err_console.print("[red]No valid targets to scan.[/]")
         raise typer.Exit(1)
 
+    apply_profile(settings, profile, targets)
+    _apply_overrides(settings, scope, wordlist, allow_internal)  # explicit options win
     output_root = output or settings.output.directory
     if dry_run:
         targets, _ = _apply_scope(settings, targets)
         _print_plan(targets, Orchestrator(settings).plan(targets, excluded, passive), output_root)
         return
 
-    context = _run_scan(settings, targets, output_root, excluded, passive)
+    context = _run_scan(settings, targets, output_root, excluded, passive, profile)
     if context is None:
         raise typer.Exit(1)
 
@@ -337,7 +357,8 @@ def _apply_scope(settings: Settings, targets: list[Target]
 
 
 def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
-              excluded: set[str], passive: bool) -> ScanContext | None:
+              excluded: set[str], passive: bool, profile: str = DEFAULT_PROFILE
+              ) -> ScanContext | None:
     """Scope-check, run with live progress, and print a summary. Shared by both modes."""
     targets, scope = _apply_scope(settings, targets)
     if not targets:
@@ -345,11 +366,11 @@ def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
         return None
 
     orchestrator = Orchestrator(settings)
-    mode = "passive" if passive else "full"
+    mode = "passive" if passive else profile
     console.print(f"[bold]Starting {mode} scan of[/] "
                   + ", ".join(f"[cyan]{escape(t.value)}[/]" for t in targets))
-    console.print("[dim]This can take from a few minutes to an hour depending on the size of "
-                  "the target. Press Ctrl+C to stop early — results so far are kept.[/]\n")
+    console.print(f"[dim]{_duration_hint(mode, len(targets))} Press Ctrl+C to stop early — "
+                  "results so far are kept.[/]\n")
 
     progress = _Progress()
     try:
@@ -357,7 +378,7 @@ def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
             progress.status = status
             context = asyncio.run(orchestrator.run(
                 targets, scope, output_root, exclude=excluded, passive=passive,
-                on_result=progress.finished, on_start=progress.started))
+                profile=profile, on_result=progress.finished, on_start=progress.started))
     except KeyboardInterrupt:
         err_console.print("\n[yellow]Scan stopped — partial results and reports were saved "
                           f"under {output_root.expanduser()}.[/]")
@@ -365,6 +386,14 @@ def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
 
     _print_summary(context)
     return context
+
+
+def _duration_hint(mode: str, count: int) -> str:
+    per_target = {"passive": "2–10 minutes", "quick": "5–15 minutes",
+                  "thorough": "30–60+ minutes"}.get(mode, "a few minutes to an hour")
+    several = (" Several targets are scanned together, so a list is much faster than "
+               "scanning them one by one.") if count > 1 else ""
+    return f"Usually {per_target} per domain.{several}"
 
 
 class _Progress:

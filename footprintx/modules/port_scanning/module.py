@@ -52,7 +52,8 @@ class PortScanningModule(BaseModule):
     applies_to = HOSTNAME_TYPES | IP_TYPES
     depends_on = ("ip_discovery",)
     integrations = ("nmap", "naabu")
-    options = frozenset({"extra_ports", "max_hosts", "rate", "scanner", "top_ports"})
+    options = frozenset({"extra_ports", "host_timeout", "max_hosts", "rate", "scanner",
+                         "top_ports"})
     active = True
 
     async def run(self, context: ScanContext) -> ModuleResult:
@@ -92,7 +93,8 @@ class PortScanningModule(BaseModule):
             cmd = await run_tool(
                 context, nmap, nmap_path,
                 nmap.port_scan_args(targets_file, str(xml_path), top_ports=top_ports,
-                                    raw_sockets=raw_sockets, ports=ports),
+                                    raw_sockets=raw_sockets, ports=ports,
+                                    host_timeout=str(self.config.option("host_timeout", "15m"))),
                 "nmap_stdout.txt", timeout=timeout)
             xml = xml_path.read_text(encoding="utf-8") if xml_path.is_file() else ""
             findings = nmap.parse(xml)

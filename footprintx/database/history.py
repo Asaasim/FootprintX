@@ -31,12 +31,17 @@ def list_scans(storage: Storage, limit: int = 20) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def previous_scan(storage: Storage, targets: Collection[str], passive: bool
+#: Scans recorded before scan profiles existed were full-depth ("thorough") scans.
+_LEGACY_MODES = {"full": "thorough"}
+
+
+def previous_scan(storage: Storage, targets: Collection[str], mode: str
                   ) -> Baseline | None:
     """The latest *completed* scan of exactly these targets, in the same mode.
 
-    Passive and full scans aren't compared with each other — a full scan would
-    "discover" everything a passive one never looks for.
+    Scans of different depth ("passive", "quick", "thorough") aren't compared with
+    each other — a deeper scan would "discover" everything a lighter one never
+    looks for.
     """
     if not storage.db_path.is_file():
         return None
@@ -46,7 +51,8 @@ def previous_scan(storage: Storage, targets: Collection[str], passive: bool
             "SELECT id, started_at, mode FROM scans WHERE status = 'completed' "
             "ORDER BY started_at DESC LIMIT 50").fetchall()
         for row in rows:
-            if (row["mode"] or "full") != ("passive" if passive else "full"):
+            recorded = row["mode"] or "full"
+            if _LEGACY_MODES.get(recorded, recorded) != mode:
                 continue
             scan_targets = sorted(r[0] for r in conn.execute(
                 "SELECT value FROM scan_targets WHERE scan_id = ?", (row["id"],)))
