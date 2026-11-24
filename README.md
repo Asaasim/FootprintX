@@ -8,7 +8,7 @@ FootprintX is a cybersecurity reconnaissance tool for digital footprint discover
 
 ## New to this? Start here
 
-**[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install on Kali Linux and run your first scan, step by step in plain language. In short:
+**[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install on Kali Linux or Ubuntu and run your first scan, step by step in plain language. In short:
 
 ```bash
 git clone https://github.com/Asaasim/FootprintX.git && cd FootprintX
@@ -20,7 +20,7 @@ footprintx           # in a new terminal: answer three questions; the report ope
 
 Give it a domain, URL, IP address, IP range or a file of targets. FootprintX works out what applies and runs it, in dependency order, in parallel where possible:
 
-| Step | Tools (Kali packages) | Built-in fallback |
+| Step | Tools | Built-in fallback |
 | --- | --- | --- |
 | Subdomain discovery | Subfinder, Assetfinder, Findomain, Amass (optional), crt.sh | zone transfers |
 | Public intelligence (OSINT) | theHarvester, RDAP registration data | RDAP only |
@@ -55,11 +55,18 @@ footprintx modules list
 footprintx history
 ```
 
-## Kali Linux (native)
+## Kali Linux and Ubuntu/Debian (native)
 
-`bash install.sh` installs the tools from Kali's repositories, installs FootprintX with pipx, creates `~/.config/footprintx/` (settings, `.env` for API keys, default wordlist), adds a menu entry and runs `footprintx doctor`. Options: `WITH_SECLISTS=1` (full SecLists, ~1 GB), `DEV=1` (editable `.venv` install).
+`bash install.sh` installs the tools, installs FootprintX with pipx, creates `~/.config/footprintx/` (settings, `.env` for API keys, default wordlist), adds a menu entry and runs `footprintx doctor`. Options: `WITH_SECLISTS=1` (full SecLists, ~1 GB), `DEV=1` (editable `.venv` install).
 
-Notes: Kali ships ProjectDiscovery's httpx as `httpx-toolkit` (`/usr/bin/httpx` is the Python library) — handled automatically. The installer makes sure Kali's nmap has its raw-socket capability, so SYN scans work without sudo. Results default to `~/FootprintX-results`.
+| | Kali Linux | Ubuntu 24.04+ / Debian 12+ (and derivatives such as Linux Mint) |
+| --- | --- | --- |
+| Tools from apt | all of them | Nmap, FFUF, Gobuster, WhatWeb |
+| Other tools | — | official prebuilt releases of Subfinder, httpx (installed as `httpx-toolkit`), Naabu, Findomain and Assetfinder in `~/.local/bin`, SHA-256-verified where the project publishes checksums ([scripts/github_release.py](scripts/github_release.py)); theHarvester with pipx (Python 3.12+) |
+| Not installed | — | Amass (optional, off by default); Assetfinder on ARM |
+| Port scans | SYN scans without sudo (the installer sets nmap's raw-socket capability, as Kali does) | TCP connect scans (run with `sudo` for SYN scans) |
+
+Notes: Kali ships ProjectDiscovery's httpx as `httpx-toolkit` (`/usr/bin/httpx` is the Python library) — handled automatically. Ubuntu 22.04 and older ship Python 3.10, which is too old — use Docker there. Results default to `~/FootprintX-results`. Any other Linux or macOS: [scripts/install_tools.sh](scripts/install_tools.sh) (needs Go) plus `pipx install .`, or Docker.
 
 Update with `git pull && bash install.sh` in the project folder; uninstall with `pipx uninstall footprintx` (details in the guide).
 

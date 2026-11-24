@@ -4,7 +4,7 @@ FootprintX looks at a company's websites and network from the outside and lists 
 
 > **Only scan things you have written permission to test.** Scanning other people's systems without permission is illegal in most countries.
 
-**You need:** a computer running Kali Linux, an internet connection, and your Kali password.
+**You need:** a computer running **Kali Linux** or **Ubuntu 24.04 or newer** (Debian 12+ and Linux Mint 22+ work too), an internet connection, and your computer password.
 
 **Tip — copying commands:** the grey boxes below contain commands. Select the text, copy it, then paste it into the Terminal with **Ctrl + Shift + V** (plain Ctrl + V does not work in the Terminal). Press **Enter** to run it.
 
@@ -12,20 +12,23 @@ FootprintX looks at a company's websites and network from the outside and lists 
 
 ## 1. Install (once)
 
-1. Open **Terminal** (the black icon in the top bar, or search for "Terminal" in the applications menu).
+1. Open **Terminal**. On Kali: the black icon in the top bar. On Ubuntu: press **Ctrl + Alt + T**, or search for "Terminal" in the applications menu.
 2. Paste this whole block and press **Enter**:
 
    ```bash
+   sudo apt install -y git
    cd ~
    git clone https://github.com/Asaasim/FootprintX.git
    cd FootprintX
    bash install.sh
    ```
 
-3. When it asks for your password, type your Kali password and press **Enter**. Nothing appears on screen while you type — that's normal.
-4. Wait. The installer downloads the scanning tools, which takes about **10–20 minutes** depending on your internet speed.
+3. When it asks for your password, type the password you use to log in to the computer and press **Enter**. Nothing appears on screen while you type — that's normal.
+4. Wait. The installer finds out whether you're on Kali or Ubuntu and downloads the right scanning tools, which takes about **10–20 minutes** depending on your internet speed.
 
 When it's done you'll see **"FootprintX is installed."** above a checklist. Lines marked `[+]` are working. Lines marked `[-]` are optional extras (for example the Shodan key from step 4) — FootprintX works without them.
+
+**On Ubuntu**, the installer also prints lines such as `installed subfinder v2.17.0 (checksum verified)` — these tools aren't in Ubuntu's own app store, so it downloads them from their official websites. Everything works the same as on Kali, with two small differences: port scans are a little slower (Ubuntu doesn't allow the fast kind without `sudo`), and the optional Amass tool isn't installed. If the installer says **"FootprintX needs Python 3.11 or newer"**, your Ubuntu is too old (22.04 or earlier) — upgrade to 24.04, or ask a technical person to set it up with Docker (see the README).
 
 ### Alternative: download a ZIP
 
@@ -48,7 +51,7 @@ bash install.sh
    footprintx
    ```
 
-   Or open the applications menu, search for **FootprintX** and click it.
+   Or open the applications menu (on Ubuntu: the **Show Apps** grid at the bottom left), search for **FootprintX** and click it.
 
 2. Answer the three questions:
 
@@ -115,6 +118,8 @@ footprintx history
    mousepad ~/.config/footprintx/.env
    ```
 
+   On Ubuntu use `gnome-text-editor ~/.config/footprintx/.env` instead (or `nano ~/.config/footprintx/.env` — save with **Ctrl + O**, Enter, and quit with **Ctrl + X**).
+
 3. Paste the key right after `SHODAN_API_KEY=` so the line looks like `SHODAN_API_KEY=abc123...` (no spaces), then **save and close** the editor.
 4. Check it worked: `footprintx doctor` should now show `[+] Shodan API  Configured`.
 
@@ -133,6 +138,8 @@ Keep this file private — don't share it or put it online.
 | A step says *skipped* | Usually it doesn't apply to that target, or it needs the optional Shodan key. The reason is shown next to it. |
 | The scan seems stuck | Large targets take time; the line at the bottom shows what's running. **Ctrl + C** stops it and keeps what was found. |
 | `git: command not found` during install | Install git first with `sudo apt install -y git`, then run the install block again. |
+| "This installer supports Kali Linux and Ubuntu/Debian" | Your system isn't one of those. FootprintX can still run with Docker — see the README. |
+| "could not install …" lines on Ubuntu | That one tool couldn't be downloaded (often a network hiccup). Run `bash install.sh` again later; FootprintX works without it meanwhile. |
 
 ---
 
@@ -151,6 +158,13 @@ bash install.sh
 ```bash
 pipx uninstall footprintx
 rm ~/.local/share/applications/footprintx.desktop
+```
+
+On Ubuntu also remove the downloaded tools:
+
+```bash
+pipx uninstall theHarvester
+rm -f ~/.local/bin/{subfinder,httpx-toolkit,naabu,findomain,assetfinder}
 ```
 
 This removes the program and its menu entry. Your results (`~/FootprintX-results`) and settings (`~/.config/footprintx`) stay until you delete those folders yourself.
