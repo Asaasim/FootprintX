@@ -39,6 +39,7 @@ from footprintx.core.models import (
     change_key,
 )
 from footprintx.core.orchestrator import Orchestrator
+from footprintx.core.preflight import check_targets
 from footprintx.core.profiles import DEFAULT_PROFILE, PROFILES, apply_profile
 from footprintx.core.scheduler import ExecutionPlan
 from footprintx.core.scope_manager import ScopeManager
@@ -364,6 +365,9 @@ def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
     if not targets:
         err_console.print("[red]No in-scope targets to scan.[/]")
         return None
+    targets = _preflight(settings, targets)
+    if not targets:
+        return None
 
     orchestrator = Orchestrator(settings)
     mode = "passive" if passive else profile
@@ -387,6 +391,24 @@ def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
 
     _print_summary(context)
     return context
+
+
+def _preflight(settings: Settings, targets: list[Target]) -> list[Target]:
+    """Drop targets that don't exist; stop if there's no working internet/DNS."""
+    resolvers = [str(r) for r in settings.module_config("dns").option("resolvers") or []]
+    with console.status("Checking the targets exist…", spinner="dots"):
+        result = asyncio.run(check_targets(targets, resolvers or None))
+    for target, reason in result.missing:
+        err_console.print(f"[yellow]\\[!] Skipping {escape(target.value)}:[/] {escape(reason)}")
+    if result.offline:
+        err_console.print("[red]Could not look up "
+                          + ", ".join(escape(t.value) for t in result.unreachable)
+                          + ".[/] Check that this computer is connected to the internet "
+                          "(open a website in the browser), then try again.")
+        return []
+    if not result.usable:
+        err_console.print("[red]Nothing left to scan.[/]")
+    return result.usable
 
 
 def _duration_hint(mode: str, count: int) -> str:
