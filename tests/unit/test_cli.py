@@ -42,3 +42,26 @@ def test_scan_does_not_ask_for_permission(tmp_path):
     assert result.exit_code == 0, result.output
     assert "authoris" not in result.output.lower()
     assert any((tmp_path / "example.com").iterdir())
+
+
+def test_report_is_shown_in_the_terminal_and_again_with_report_command(tmp_path):
+    """Feedback from the user: read the report in the command line, no browser needed."""
+    from footprintx.modules import MODULE_REGISTRY
+
+    config = tmp_path / "config.yaml"
+    config.write_text(f"output:\n  directory: {(tmp_path / 'results').as_posix()}\n",
+                      encoding="utf-8")
+    scan = runner.invoke(app, ["--config", str(config), "scan", "-t", "example.com",
+                               "-x", ",".join(MODULE_REGISTRY)])
+    assert scan.exit_code == 0, scan.output
+    assert "FootprintX Reconnaissance Report" in scan.output
+    assert "Saved on this computer" in scan.output and "report.txt" in scan.output
+
+    again = runner.invoke(app, ["--config", str(config), "report"])
+    assert again.exit_code == 0, again.output
+    assert "FootprintX Reconnaissance Report" in again.output
+    assert "example.com" in again.output
+
+    folder = next((tmp_path / "results" / "example.com").iterdir())
+    assert runner.invoke(app, ["--config", str(config), "report", str(folder)]).exit_code == 0
+    assert runner.invoke(app, ["--config", str(config), "report", "5"]).exit_code == 1

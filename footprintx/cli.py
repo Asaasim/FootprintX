@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import re
 import sys
@@ -47,7 +48,9 @@ from footprintx.database.history import list_scans
 from footprintx.database.storage import HISTORY_DB, Storage
 from footprintx.modules import MODULE_REGISTRY, module_config_warnings
 from footprintx.reporting.correlator import correlate, count_hosts
+from footprintx.reporting.text_report import render_text_report
 from footprintx.utils.dependency_checker import run_doctor
+from footprintx.utils.sanitize import redact
 
 
 def _use_utf8_output() -> None:
@@ -210,9 +213,11 @@ def guided(ctx: typer.Context) -> None:
     console.print()
     context = _run_scan(settings, targets, settings.output.directory, set(), passive,
                         profile)
+    # The report has already been shown in the terminal; the web page is optional.
     report = context.reports_dir / "report.html" if context else None
     if report and report.is_file() and _can_open_browser() and \
-            Confirm.ask("\nOpen the report in your web browser now?", default=True):
+            Confirm.ask("\nAlso open the report as a web page (a file on this computer)?",
+                        default=False):
         webbrowser.open(report.resolve().as_uri())
     _pause_if_launcher()
 
@@ -458,7 +463,10 @@ def _print_summary(context: ScanContext) -> None:
                     if f.kind is FindingKind.OBSERVATION}
 
     console.print(f"\n[bold green]Scan {context.status}[/] in "
-                  f"{(context.duration or 0) / 60:.1f} minutes.")
+                  f"{(context.duration or 0) / 60:.1f} minutes. The report:\n")
+    _show_report(context.output_dir)
+
+    console.print("[bold]In short[/]")
     names = len({f.value for f in findings if f.kind is FindingKind.SUBDOMAIN})
     extra = f" (from {names:,} subdomain names in public sources)" if names > hosts else ""
     issues = sum(1 for f in observations.values()
@@ -492,9 +500,37 @@ def _print_summary(context: ScanContext) -> None:
             table.add_row(Text(sev.upper(), style=SEVERITY_STYLE.get(sev, "")), Text(f.value),
                           Text(f.target or ""))
         console.print(table)
+    _print_saved_files(context.output_dir)
 
-    console.print("\n[bold]Full report:[/] " + escape(str(context.reports_dir / "report.html")))
-    console.print("[dim]All results: " + escape(str(context.output_dir)) + "[/]")
+
+def _show_report(scan_dir: Path, full: bool = False) -> bool:
+    """Print a scan's report in the terminal. ``full`` adds every finding list."""
+    reports = scan_dir / "reports"
+    text: str | None = None
+    with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+        data = json.loads((reports / "report.json").read_text(encoding="utf-8"))
+        text = render_text_report(data, full=full)
+    if text is None and (reports / "report.txt").is_file():
+        text = (reports / "report.txt").read_text(encoding="utf-8", errors="replace")
+    if text is None:
+        err_console.print("[yellow]No report found in " + escape(str(scan_dir)) + "[/]")
+        return False
+    # Text(): report content comes from the targets and must never be read as markup.
+    console.print(Text(redact(text)))
+    return True
+
+
+def _print_saved_files(scan_dir: Path) -> None:
+    reports = scan_dir / "reports"
+    files = [("Report (text)", reports / "report.txt"),
+             ("Report (web page)", reports / "report.html"),
+             ("Spreadsheet", reports / "findings.csv")]
+    console.print("\n[bold]Saved on this computer[/] in " + escape(str(scan_dir)) + ":")
+    for label, path in files:
+        if path.is_file():
+            console.print(f"  {label:<18} " + escape(str(path.relative_to(scan_dir))))
+    console.print("Show this report again at any time with:  [cyan]footprintx report[/]  "
+                  "(add [cyan]--full[/] for every finding)")
 
 
 def _print_plan(targets: list[Target], plan: ExecutionPlan, output_dir: Path) -> None:
@@ -595,6 +631,51 @@ def history(
     for i, s in enumerate(scans, start=1):
         report = _display_path(Path(s["output_dir"]) / "reports" / "report.html")
         console.print(Text(f"  {i:>2}  {report}", overflow="fold"))
+
+
+@app.command()
+def report(
+    ctx: typer.Context,
+    which: Annotated[
+        str,
+        typer.Argument(help="Which scan: 1 = the latest, 2 = the one before, … "
+                            "(numbers as in 'footprintx history'), or a scan folder."),
+    ] = "1",
+    full: Annotated[
+        bool, typer.Option("--full", help="Also list every finding (long).")
+    ] = False,
+) -> None:
+    """Show a scan's report here in the terminal."""
+    settings = _settings(ctx)
+    scan_dir = _find_scan_dir(settings, which)
+    if scan_dir is None:
+        err_console.print("[red]No such scan.[/] See the list with:  footprintx history")
+        raise typer.Exit(1)
+    if not _show_report(scan_dir, full=full):
+        raise typer.Exit(1)
+    _print_saved_files(scan_dir)
+
+
+def _find_scan_dir(settings: Settings, which: str) -> Path | None:
+    """A scan folder given directly, or the Nth most recent scan."""
+    candidate = Path(which).expanduser()
+    if not which.isdigit():
+        if (candidate / "reports").is_dir():
+            return candidate
+        if candidate.name == "reports" and candidate.is_dir():
+            return candidate.parent
+        return None
+    number = int(which)
+    if number < 1:
+        return None
+    root = settings.output.directory.expanduser()
+    scans = list_scans(Storage(root / HISTORY_DB), number)
+    if len(scans) >= number:
+        return Path(scans[number - 1]["output_dir"])
+    # No history database (e.g. results copied from elsewhere): newest folders first.
+    folders = sorted((p.parent for p in root.glob("*/scan_*/reports")),
+                     key=lambda p: p.stat().st_mtime, reverse=True)
+    return folders[number - 1] if len(folders) >= number else None
 
 
 def _display_path(path: Path) -> str:

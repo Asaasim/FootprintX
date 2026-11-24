@@ -10,7 +10,9 @@ from footprintx.utils.sanitize import redact
 _RULE = "-" * 60
 
 
-def render_text_report(data: dict[str, Any]) -> str:
+def render_text_report(data: dict[str, Any], *, full: bool = True) -> str:
+    """The report as plain text. ``full=False`` leaves out the complete finding lists
+    at the end (shown in the terminal after a scan; they stay in report.txt)."""
     summary = data["summary"]
     obs = summary["observations"]
     lines = [
@@ -82,6 +84,9 @@ def render_text_report(data: dict[str, Any]) -> str:
         note = m["skip_reason"] or "; ".join(m["errors"] + m["notes"])
         lines.append(f"  [{m['status'].upper():7}] {m['module']:<22} "
                      f"{m['findings']:>5} findings  {note or ''}".rstrip())
+
+    if not full:
+        return "\n".join(lines) + "\n"
 
     for kind, items in data["findings"].items():
         lines += ["", f"{kind.replace('_', ' ').title()} ({len(items)})", _RULE]
