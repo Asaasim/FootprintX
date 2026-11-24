@@ -8,6 +8,19 @@ from typing import Any
 from footprintx.utils.sanitize import redact
 
 _RULE = "-" * 60
+#: The terminal view must fit in a terminal's scrollback (often 1,000 lines), so it
+#: shows the most interesting hosts and the first informational notes only.
+TERMINAL_MAX_HOSTS = 40
+TERMINAL_MAX_INFO = 15
+
+
+def _terminal_hosts(groups: list[dict[str, Any]]) -> set[int]:
+    """ids of the hosts worth showing in the terminal: issues first, then open ports,
+    then live websites."""
+    hosts = [h for g in groups for h in g["hosts"]]
+    ranked = sorted(hosts, key=lambda h: (-len(h["observations"]), -len(h["ports"]),
+                                          -len(h["urls"]), h["host"]))
+    return {id(h) for h in ranked[:TERMINAL_MAX_HOSTS]}
 
 
 def render_text_report(data: dict[str, Any], *, full: bool = True) -> str:
@@ -41,16 +54,33 @@ def render_text_report(data: dict[str, Any], *, full: bool = True) -> str:
 
     if data["observations"]:
         lines += ["", "Security observations", _RULE]
-        for o in data["observations"]:
+        observations = data["observations"]
+        hidden_info = 0
+        if not full:
+            # Terminal: every real issue, but only the first few informational notes.
+            info = [o for o in observations if o["data"].get("severity", "info") == "info"]
+            hidden_info = max(0, len(info) - TERMINAL_MAX_INFO)
+            keep = {id(o) for o in info[:TERMINAL_MAX_INFO]}
+            observations = [o for o in observations
+                            if o["data"].get("severity", "info") != "info" or id(o) in keep]
+        for o in observations:
             lines.append(f"  [{o['data'].get('severity', 'info').upper():6}] {o['value']}"
                          f" — {o['target']}")
             if o["data"].get("detail"):
                 lines.append(f"           {o['data']['detail']}")
+        if hidden_info:
+            lines.append(f"  … and {hidden_info} more informational notes "
+                         "(footprintx report --full, or report.txt)")
 
     lines += ["", "Attack surface", _RULE]
+    shown = _terminal_hosts(data["assets"]) if not full else None
     for group in data["assets"]:
         lines.append(group["root"])
         hosts = group["hosts"]
+        hidden = 0
+        if shown is not None:
+            hidden = len(hosts) - len([h for h in hosts if id(h) in shown])
+            hosts = [h for h in hosts if id(h) in shown]
         for i, host in enumerate(hosts):
             last = i == len(hosts) - 1
             lines.append(f"  {'└──' if last else '├──'} {host['host']}")
@@ -73,6 +103,9 @@ def render_text_report(data: dict[str, Any], *, full: bool = True) -> str:
                 details.append(f"! [{o['severity']}] {o['title']}")
             for j, detail in enumerate(details):
                 lines.append(f"{pad}{'└─' if j == len(details) - 1 else '├─'} {detail}")
+        if shown is not None and hidden:
+            lines.append(f"  + {hidden} more hosts with less to show "
+                         "(footprintx report --full, or report.txt)")
         if group.get("other_names"):
             lines.append(f"  + {group['other_names']} more names with nothing else known "
                          "(see subdomains.txt)")
