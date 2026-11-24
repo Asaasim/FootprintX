@@ -25,6 +25,23 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _VERSION = re.compile(r"v?\d+\.\d+(?:\.\d+)?(?:[-+.][0-9A-Za-z.]+)?")
 
 
+#: Tools that Ubuntu/Debian package too (the rest are Kali-only packages).
+DEBIAN_PACKAGES = frozenset({"nmap", "ffuf", "gobuster", "whatweb"})
+#: Kali-only packages that install.sh downloads itself on Ubuntu/Debian.
+INSTALLER_FETCHED = frozenset({"subfinder", "httpx-toolkit", "naabu", "findomain",
+                               "assetfinder", "theharvester"})
+
+
+def _search_dirs() -> list[str]:
+    """``PATH``, plus ``~/.local/bin`` where install.sh puts tools on Ubuntu/Debian
+    (it is only added to ``PATH`` at the next login)."""
+    dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+    local_bin = str(Path.home() / ".local" / "bin")
+    if local_bin not in dirs:
+        dirs.append(local_bin)
+    return dirs
+
+
 class ToolNotFoundError(RuntimeError):
     pass
 
@@ -53,8 +70,13 @@ class ToolIntegration(Integration):
     reject_markers: ClassVar[tuple[str, ...]] = ()
 
     def installation_hint(self) -> str:
-        if self.apt_package and detect_platform().uses_apt:
+        info = detect_platform()
+        if self.apt_package and (info.is_kali or
+                                 (info.uses_apt and self.apt_package in DEBIAN_PACKAGES)):
             return f"sudo apt install {self.apt_package}"
+        if info.uses_apt and self.apt_package in INSTALLER_FETCHED:
+            # Ubuntu/Debian don't package it; install.sh fetches the official release.
+            return "run  bash install.sh  again in the FootprintX folder"
         return self.install_hint
 
     def locate(self, override: str | None = None) -> str | None:
@@ -68,12 +90,10 @@ class ToolIntegration(Integration):
         return None
 
     def _find_on_path(self, binary: str) -> str | None:
-        if not self.reject_markers:
-            return shutil.which(binary)
-        for directory in os.environ.get("PATH", "").split(os.pathsep):
-            candidate = shutil.which(binary, path=directory) if directory else None
-            if candidate and not any(m in self._version_output(candidate)
-                                     for m in self.reject_markers):
+        for directory in _search_dirs():
+            candidate = shutil.which(binary, path=directory)
+            if candidate and not (self.reject_markers and any(
+                    m in self._version_output(candidate) for m in self.reject_markers)):
                 return candidate
         return None
 
