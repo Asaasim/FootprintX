@@ -57,3 +57,24 @@ def test_thorough_profile_keeps_the_config_file():
     apply_profile(settings, "thorough", [Target("example.com", TargetType.DOMAIN)])
     assert settings.module_config("port_scanning").option("top_ports") == 1000
     assert settings.module_config("web_fuzzing").option("max_targets") == 10
+
+
+def test_capped_steps_pick_the_same_most_relevant_items_every_run(tmp_path):
+    """Quick scans only cover the first N websites/hosts: the choice must be stable
+    (else re-scanning an unchanged target reports different results) and must
+    start with what the user asked for."""
+    import random
+
+    from footprintx.core.context import ScanContext
+    from footprintx.core.scope_manager import ScopeManager
+    from footprintx.modules.common import most_relevant_first
+
+    target = Target("example.com", TargetType.DOMAIN)
+    context = ScanContext("s", tmp_path, Settings(), ScopeManager(["example.com"]), [target])
+    urls = ["http://zz.example.com", "https://a.example.com", "http://www.example.com",
+            "http://example.com", "https://example.com", "http://a.example.com"]
+    expected = ["https://example.com", "http://example.com", "http://www.example.com",
+                "https://a.example.com", "http://a.example.com", "http://zz.example.com"]
+    for _ in range(5):
+        random.shuffle(urls)
+        assert most_relevant_first(context, urls) == expected

@@ -31,6 +31,7 @@ from footprintx.modules.common import (
     live_urls,
     locate,
     missing_tool_note,
+    most_relevant_first,
     run_tool,
     skipped,
 )
@@ -56,7 +57,7 @@ class TechnologyDetectionModule(BaseModule):
         if not urls:
             return skipped(self.name, "no live websites found")
         max_urls = int(self.config.option("max_urls", 100))
-        urls = urls[:max_urls]
+        urls = most_relevant_first(context, urls)[:max_urls]
 
         result = ModuleResult(self.name, ModuleStatus.SUCCESS)
         result.findings.extend(await self._native(urls, context))

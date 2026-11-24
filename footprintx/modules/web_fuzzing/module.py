@@ -31,6 +31,7 @@ from footprintx.modules.common import (
     live_urls,
     locate,
     missing_tool_note,
+    most_relevant_first,
     skipped,
 )
 from footprintx.modules.common import run_tool as run_external
@@ -81,7 +82,7 @@ class WebFuzzingModule(BaseModule):
     active = True
 
     async def run(self, context: ScanContext) -> ModuleResult:
-        bases = list(dict.fromkeys(base_url(u) for u in live_urls(context)))
+        bases = most_relevant_first(context, [base_url(u) for u in live_urls(context)])
         if not bases:
             return skipped(self.name, "no live websites found")
 

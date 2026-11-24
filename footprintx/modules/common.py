@@ -181,6 +181,29 @@ def host_of(value: str) -> str:
     return (urlsplit(value).hostname or "") if "://" in value else value
 
 
+def most_relevant_first(context: ScanContext, values: list[str]) -> list[str]:
+    """Hosts / URLs ordered so the ones the user asked about come first, then
+    ``www.`` of those, then the rest alphabetically (HTTPS before HTTP).
+
+    Used wherever a scan step only covers the first N items: the choice must be
+    the most useful one AND the same on every run, or two scans of an unchanged
+    target would report different results.
+    """
+    asked = {host_of(t.value).lower() for t in context.targets}
+
+    def rank(value: str) -> tuple[int, str, int, str]:
+        host = host_of(value).lower()
+        if host in asked:
+            tier = 0
+        elif host.startswith("www.") and host[4:] in asked:
+            tier = 1
+        else:
+            tier = 2
+        return tier, host, 0 if value.startswith("https://") else 1, value
+
+    return sorted(dict.fromkeys(values), key=rank)
+
+
 async def run_tool(
     context: ScanContext,
     tool: ToolIntegration,

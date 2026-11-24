@@ -25,6 +25,7 @@ from footprintx.modules.common import (
     dns_resolvers,
     locate,
     missing_tool_note,
+    most_relevant_first,
     resolved_hostnames,
     run_tool,
     scan_ips,
@@ -57,7 +58,7 @@ class PortScanningModule(BaseModule):
     active = True
 
     async def run(self, context: ScanContext) -> ModuleResult:
-        targets = list(dict.fromkeys([*resolved_hostnames(context), *scan_ips(context)]))
+        targets = most_relevant_first(context, [*resolved_hostnames(context), *scan_ips(context)])
         max_hosts = int(self.config.option("max_hosts", 256))
         if not targets:
             return skipped(self.name, "no resolved hosts or in-scope IPs to scan")
