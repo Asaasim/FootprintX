@@ -4,7 +4,7 @@ FootprintX is a cybersecurity reconnaissance tool for digital footprint discover
 
 **One target. One command. Comprehensive reconnaissance.** Full specification: [Spectifications.md](Spectifications.md).
 
-> Only scan targets you are authorised to test. FootprintX asks for confirmation before every scan and keeps all activity inside the targets you give it (or the `--scope` you set — see *Configuration*).
+> Only scan targets you are authorised to test. FootprintX keeps all activity inside the targets you give it (or the `--scope` you set — see *Configuration*).
 
 ## New to this? Start here
 
@@ -13,7 +13,7 @@ FootprintX is a cybersecurity reconnaissance tool for digital footprint discover
 ```bash
 git clone https://github.com/Asaasim/FootprintX.git && cd FootprintX
 bash install.sh      # once, as your normal user (asks for your password)
-footprintx           # in a new terminal: answer three questions; the report opens in your browser
+footprintx           # in a new terminal: answer two questions; the report is shown in the terminal
 ```
 
 ## What it does
@@ -33,9 +33,17 @@ Give it a domain, URL, IP address, IP range or a file of targets. FootprintX wor
 | Shodan lookups (optional, needs `SHODAN_API_KEY`) | Shodan API | — |
 | Send findings to Burp Suite / ZAP, optionally import ZAP's passive-scan alerts (off by default) | your proxy, ZAP API | — |
 
-A failing or missing tool never stops the scan: its step is skipped or falls back, and the report says so. **Passive mode** (`--passive`, or option 2 in the guided mode) uses public sources only and never contacts the target's servers.
+A failing or missing tool never stops the scan: its step is skipped or falls back, and the report says so. **Scan depth:**
 
-Every scan creates `<results>/<target>/scan_<timestamp>/` (`<results>` is `~/FootprintX-results` after `install.sh`, `./results` in Docker or a project checkout) with `reports/report.html` (readable summary, security observations ranked by severity, per-host attack-surface map), `report.json`, `report.txt`, `findings.csv` (add `xml` to `output.formats` for `report.xml`), per-category files (`subdomains.txt`, `open_ports.json`, `shodan_results.json`, …), `scan.log` (including an audit trail of every tool command run) and untouched tool output in `raw/`. Scan history is kept in `<results>/footprintx.db` (`footprintx history`); each scan is compared with the previous one of the same targets, and anything **new since the last scan** is highlighted.
+| Profile | How | Typical time per domain | What it does |
+| --- | --- | --- | --- |
+| **Quick** (default) | `--profile quick`, guided option 1 | 5–15 minutes | top 100 ports + risky services (Redis, databases, RDP…) on up to 50 hosts, a short built-in high-value wordlist (`.git`, `.env`, backups, admin panels…) on the 3 main websites, 3-minute source timeouts |
+| **Thorough** | `--profile thorough`, guided option 2 | 30–60+ minutes | the limits in `config.yaml`: top 1000 ports on up to 256 hosts, the full wordlist on up to 10 websites |
+| **Passive** | `--passive`, guided option 3 | 2–10 minutes | public sources only; never contacts the target's servers |
+
+Quick-scan limits grow with the number of domains, and a list of targets is scanned together rather than one after the other.
+
+At the end of a scan the report is printed **in the terminal**; `footprintx report` shows it again later (`footprintx report 2` for the scan before, `--full` for every finding). Every scan also creates `<results>/<target>/scan_<timestamp>/` (`<results>` is `~/FootprintX-results` after `install.sh`, `./results` in Docker or a project checkout) with `reports/report.html` (readable summary, security observations ranked by severity, per-host attack-surface map), `report.json`, `report.txt`, `findings.csv` (add `xml` to `output.formats` for `report.xml`), per-category files (`subdomains.txt`, `open_ports.json`, `shodan_results.json`, …), `scan.log` (including an audit trail of every tool command run) and untouched tool output in `raw/`. Scan history is kept in `<results>/footprintx.db` (`footprintx history`); each scan is compared with the previous one of the same targets, and anything **new since the last scan** is highlighted.
 
 ## Commands
 
@@ -44,15 +52,17 @@ footprintx                                       # guided mode
 footprintx scan -t example.com                   # domain, subdomain, URL, IP, IPv6 or CIDR; repeatable
 footprintx scan -l targets.txt -o ./results      # bulk targets
 footprintx scan -t example.com --passive         # public sources only
+footprintx scan -t example.com -p thorough       # deeper, slower scan (default: quick)
 footprintx scan -t example.com --exclude shodan,web_fuzzing
 footprintx scan -t example.com --scope scope.txt   # authorised scope (domains/IPs/CIDRs, or a file)
 footprintx scan -t example.com -w words.txt      # custom fuzzing wordlist
 footprintx scan -t corp.example --allow-internal # internal test: scan names resolving to 10.x etc.
 footprintx scan -t example.com --dry-run         # show the execution plan only
-footprintx scan -t example.com --yes -v          # skip the authorisation prompt, debug logs
+footprintx scan -t example.com -v                # debug logs
 footprintx doctor                                # check tools, API keys, config
 footprintx modules list
-footprintx history
+footprintx history                               # previous scans
+footprintx report                                # show the latest report in the terminal
 ```
 
 ## Kali Linux and Ubuntu/Debian (native)
@@ -89,8 +99,8 @@ cp .env.example .env                                   # optional: SHODAN_API_KE
 docker compose build
 docker compose run --rm footprintx                     # guided mode
 docker compose run --rm footprintx doctor
-docker compose run --rm footprintx scan -t example.com --yes
-docker compose run --rm footprintx scan -l targets/targets.txt --yes   # file in ./targets
+docker compose run --rm footprintx scan -t example.com
+docker compose run --rm footprintx scan -l targets/targets.txt   # file in ./targets
 ```
 
 Results go to `./results`; `./config` is mounted read-only; files in `./wordlists` appear at `/app/wordlists/custom`; bulk target files go in `./targets` (gitignored). The container drops all Linux capabilities except `NET_RAW` (for SYN scans). Build args: `docker compose build --build-arg INSTALL_AMASS=false` leaves Amass out; `--build-arg UID=$(id -u)` matches the container user to yours on Linux so the files in `./results` are owned by you. To reach Burp/ZAP on the host, set the proxy URL to `http://host.docker.internal:8080`. With `modules.proxy.api: zap`, FootprintX also reads ZAP's passive-scan alerts through its API and adds them to the report as observations (set `ZAP_API_KEY` in `.env` if ZAP's API key is enabled).
@@ -128,8 +138,8 @@ FOOTPRINTX_E2E=1 pytest tests/e2e -v      # ~5 minutes
 
 ```text
 footprintx/
-├── cli.py            guided mode + scan / doctor / modules / history commands
-├── core/             config, targets, scope, scheduler, engine, orchestrator, logging
+├── cli.py            guided mode + scan / report / doctor / modules / history commands
+├── core/             config, scan profiles, targets, scope, scheduler, engine, orchestrator, logging
 ├── modules/          one package per recon step; base.py = BaseModule, common.py = input helpers
 ├── integrations/     wrappers that run external tools / call APIs and parse their output
 ├── reporting/        normalise → dedupe → correlate → JSON / HTML / TXT / CSV / XML reports
