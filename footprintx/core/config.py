@@ -21,12 +21,15 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from footprintx.utils.locations import user_home
+
 CONFIG_ENV_VAR = "FOOTPRINTX_CONFIG"
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
-USER_CONFIG_DIR = Path.home() / ".config" / "footprintx"
+# user_home(): the real user's home, also under sudo (where HOME may be /root).
+USER_CONFIG_DIR = user_home() / ".config" / "footprintx"
 USER_CONFIG_PATH = USER_CONFIG_DIR / "config.yaml"
 USER_ENV_PATH = USER_CONFIG_DIR / ".env"
-DEFAULT_RESULTS_DIR = Path.home() / "FootprintX-results"
+DEFAULT_RESULTS_DIR = user_home() / "FootprintX-results"
 
 
 class ConfigError(Exception):
@@ -73,6 +76,15 @@ REPORT_FORMATS = ("json", "html", "txt", "csv", "xml")
 class OutputConfig(BaseModel):
     directory: Path = DEFAULT_RESULTS_DIR
     formats: list[str] = Field(default_factory=lambda: ["json", "html", "txt", "csv"])
+
+    @field_validator("directory")
+    @classmethod
+    def _expand_home(cls, value: Path) -> Path:
+        # "~" means the real user's home even under sudo (Path.expanduser uses $HOME).
+        parts = value.parts
+        if parts and parts[0] == "~":
+            return user_home().joinpath(*parts[1:])
+        return value
 
     @field_validator("formats")
     @classmethod

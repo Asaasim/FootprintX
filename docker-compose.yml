@@ -23,6 +23,9 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      # Lets FootprintX print where results are on YOUR computer, not inside the container.
+      FOOTPRINTX_HOST_DIR: ${PWD:-}
     volumes:
       - ./results:/app/results
       - ./config:/app/config:ro

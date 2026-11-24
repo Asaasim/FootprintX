@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from footprintx.utils.locations import user_home
+
 DEFAULT_WORDLIST_CANDIDATES: tuple[Path, ...] = (
     Path("wordlists/common.txt"),                                  # project / Docker image
-    Path.home() / ".config/footprintx/wordlists/common.txt",       # install.sh download
+    user_home() / ".config/footprintx/wordlists/common.txt",       # install.sh download
     Path("/usr/share/seclists/Discovery/Web-Content/common.txt"),  # Kali: apt install seclists
     Path("/usr/share/wordlists/dirb/common.txt"),                  # Kali: wordlists package
     Path("/usr/share/dirb/wordlists/common.txt"),                  # Kali: apt install dirb

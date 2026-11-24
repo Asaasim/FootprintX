@@ -14,7 +14,6 @@ import os
 import re
 import sys
 import time
-import webbrowser
 from pathlib import Path
 from typing import Annotated
 
@@ -50,6 +49,7 @@ from footprintx.modules import MODULE_REGISTRY, module_config_warnings
 from footprintx.reporting.correlator import correlate, count_hosts
 from footprintx.reporting.text_report import render_text_report
 from footprintx.utils.dependency_checker import run_doctor
+from footprintx.utils.locations import can_open_page, describe, open_page
 from footprintx.utils.sanitize import redact
 
 
@@ -215,17 +215,12 @@ def guided(ctx: typer.Context) -> None:
                         profile)
     # The report has already been shown in the terminal; the web page is optional.
     report = context.reports_dir / "report.html" if context else None
-    if report and report.is_file() and _can_open_browser() and \
+    if report and report.is_file() and can_open_page() and \
             Confirm.ask("\nAlso open the report as a web page (a file on this computer)?",
-                        default=False):
-        webbrowser.open(report.resolve().as_uri())
+                        default=False) and not open_page(report):
+        console.print("[yellow]Could not open a browser — the report is shown above and "
+                      "saved in report.txt.[/]")
     _pause_if_launcher()
-
-
-def _can_open_browser() -> bool:
-    if sys.platform.startswith("linux"):
-        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    return True
 
 
 def _pause_if_launcher() -> None:
@@ -386,7 +381,8 @@ def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
                 profile=profile, on_result=progress.finished, on_start=progress.started))
     except KeyboardInterrupt:
         err_console.print("\n[yellow]Scan stopped — partial results and reports were saved "
-                          f"under {output_root.expanduser()}.[/]")
+                          "under " + escape(describe(output_root)) + ".[/]\n"
+                          "Read the report with:  footprintx report")
         raise typer.Exit(130) from None
 
     _print_summary(context)
@@ -525,7 +521,7 @@ def _print_saved_files(scan_dir: Path) -> None:
     files = [("Report (text)", reports / "report.txt"),
              ("Report (web page)", reports / "report.html"),
              ("Spreadsheet", reports / "findings.csv")]
-    console.print("\n[bold]Saved on this computer[/] in " + escape(str(scan_dir)) + ":")
+    console.print("\n[bold]Saved on this computer[/] in " + escape(describe(scan_dir)) + ":")
     for label, path in files:
         if path.is_file():
             console.print(f"  {label:<18} " + escape(str(path.relative_to(scan_dir))))
@@ -629,7 +625,7 @@ def history(
     console.print(table)
     console.print("\n[bold]Reports[/]")
     for i, s in enumerate(scans, start=1):
-        report = _display_path(Path(s["output_dir"]) / "reports" / "report.html")
+        report = describe(Path(s["output_dir"]) / "reports" / "report.txt")
         console.print(Text(f"  {i:>2}  {report}", overflow="fold"))
 
 
@@ -676,11 +672,3 @@ def _find_scan_dir(settings: Settings, which: str) -> Path | None:
     folders = sorted((p.parent for p in root.glob("*/scan_*/reports")),
                      key=lambda p: p.stat().st_mtime, reverse=True)
     return folders[number - 1] if len(folders) >= number else None
-
-
-def _display_path(path: Path) -> str:
-    """``path`` relative to the current directory when it is inside it (shorter)."""
-    try:
-        return str(path.resolve().relative_to(Path.cwd().resolve()))
-    except ValueError:
-        return str(path)
