@@ -93,7 +93,9 @@ The report (in the Terminal, in `report.txt` and in the web page) has these part
 
   These are **leads to check**, not confirmed vulnerabilities.
 
-- **Attack surface** — one entry per host with its IP addresses, websites, open ports and technologies.
+- **Attack surface** — one entry per host with its IP addresses, websites, open ports and technologies. In the Terminal only the 40 most interesting hosts are shown (those with issues first); `footprintx report --full` and `report.txt` list them all.
+
+  Ports marked **Cloudflare edge** are not the company's own: the site is behind Cloudflare (a service that sits in front of websites), and those ports belong to Cloudflare's servers. They are not counted as open ports.
 - **What ran** — each step and whether it succeeded, was skipped (and why), or failed.
 - **All findings** — the complete lists, for reference (in `report.txt`, the web page, and `footprintx report --full`).
 
@@ -146,7 +148,10 @@ Keep this file private — don't share it or put it online.
 | You want to check what's installed | Type `footprintx doctor`. Everything marked `[+]` is working; `[-]` lines say what to do. |
 | You want to see the report again | Type `footprintx report`. |
 | The web page didn't open | You don't need it — the same report is shown in the Terminal and with `footprintx report`. To open the page anyway: open the **Files** app → **Home** → **FootprintX-results** → your target → the newest scan folder → `reports` → double-click `report.html`. |
-| "was not understood" when typing a target | Type just the address, e.g. `example.com` or `https://example.com` — not an email address, and no spaces inside it. |
+| "was not understood" when typing a target | Type just the address, e.g. `example.com` or `https://example.com` — not an email address, and no spaces inside it. (`*.example.com`, `example.com/` and `example.com/login` are fine too.) |
+| "Skipping …: does not exist — check the spelling" | That domain has no records on the internet, usually a typo (`exmaple.com`). The other targets are still scanned. |
+| "Could not look up … check that this computer is connected to the internet" | Nothing could be looked up, so the scan didn't start. Open a website in the browser to check the connection, then try again. |
+| "Could not save the results" | The disk is full, or the results folder isn't yours (for example after running FootprintX with `sudo`). The message shows the command that fixes the folder. |
 | A step says *skipped* | Usually it doesn't apply to that target, or it needs the optional Shodan key. The reason is shown next to it. |
 | The scan takes too long | Use the quick scan (option `1`). The line at the bottom shows what's running and for how long. **Ctrl + C** stops it and keeps what was found. |
 | `git: command not found` during install | Install git first with `sudo apt install -y git`, then run the install block again. |
