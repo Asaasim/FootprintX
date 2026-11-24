@@ -92,3 +92,18 @@ def test_terminal_report_fits_in_scrollback_but_files_are_complete():
     assert len(short.splitlines()) < 500
     full = render_text_report(data)
     assert "h000.example.com" in full and "h299.example.com" in full and "note 49" in full
+
+
+def test_unwritable_results_folder_gives_a_plain_message(tmp_path, monkeypatch):
+    from footprintx.core.orchestrator import Orchestrator
+    from footprintx.modules import MODULE_REGISTRY
+
+    async def denied(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Orchestrator, "run", denied)
+    result = runner.invoke(app, ["scan", "-t", "example.com", "-o", str(tmp_path),
+                                 "-x", ",".join(MODULE_REGISTRY)])
+    assert result.exit_code == 1
+    assert "Could not save the results" in result.output
+    assert "Traceback" not in result.output

@@ -388,6 +388,14 @@ def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
                           "under " + escape(describe(output_root)) + ".[/]\n"
                           "Read the report with:  footprintx report")
         raise typer.Exit(130) from None
+    except OSError as exc:  # results folder not writable, disk full, …
+        err_console.print("[red]Could not save the results in "
+                          + escape(describe(output_root)) + ":[/] "
+                          + escape(exc.strerror or str(exc)) + "\n"
+                          "Check there is free disk space and that the folder belongs to you "
+                          "(if you once ran FootprintX with sudo:  sudo chown -R $USER "
+                          + escape(str(output_root)) + ").")
+        raise typer.Exit(1) from None
 
     _print_summary(context)
     return context
