@@ -51,10 +51,10 @@ def _hostname(target: Target) -> str:
         else target.value
 
 
-async def _status(resolver: dns.asyncresolver.Resolver, name: str) -> str:
+async def _status(resolver: dns.asyncresolver.Resolver, name: str, rtype: str = "SOA") -> str:
     """'ok', 'nxdomain' or 'timeout'."""
     try:
-        await resolver.resolve(name, "SOA", raise_on_no_answer=False)
+        await resolver.resolve(name, rtype, raise_on_no_answer=False)
         return "ok"
     except dns.resolver.NXDOMAIN:
         return "nxdomain"
@@ -62,6 +62,12 @@ async def _status(resolver: dns.asyncresolver.Resolver, name: str) -> str:
         return "timeout"
     except dns.exception.DNSException:
         return "ok"  # unusual answer, but the name is reachable — let the scan decide
+
+
+async def _status_any(resolver: dns.asyncresolver.Resolver, name: str) -> str:
+    """Some networks block unusual lookups; an ordinary address lookup settles it."""
+    status = await _status(resolver, name)
+    return await _status(resolver, name, "A") if status == "timeout" else status
 
 
 async def check_targets(targets: list[Target], resolvers: list[str] | None = None
@@ -78,7 +84,7 @@ async def check_targets(targets: list[Target], resolvers: list[str] | None = Non
     # subdomain of a real domain is still worth a passive look).
     registered = {t: (_registered_domain(_hostname(t)) or _hostname(t)) for t in names}
     unique = sorted(set(registered.values()))
-    statuses = dict(zip(unique, await asyncio.gather(*(_status(resolver, d) for d in unique)),
+    statuses = dict(zip(unique, await asyncio.gather(*(_status_any(resolver, d) for d in unique)),
                         strict=True))
     for target in targets:
         if target not in registered:

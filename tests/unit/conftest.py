@@ -14,3 +14,13 @@ def no_network_preflight(request, monkeypatch):
         return PreflightResult(usable=list(targets))
 
     monkeypatch.setattr(cli, "check_targets", passthrough)
+
+
+@pytest.fixture(autouse=True)
+def no_dns_over_https(monkeypatch):
+    from footprintx.modules.dns import module
+
+    async def unavailable(name, rtype):
+        return None
+
+    monkeypatch.setattr(module, "doh_lookup", unavailable)

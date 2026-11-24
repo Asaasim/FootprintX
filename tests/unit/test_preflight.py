@@ -7,7 +7,7 @@ parse = TargetParser().parse
 
 
 async def _run(monkeypatch, statuses, *raw):
-    async def fake_status(resolver, name):
+    async def fake_status(resolver, name, rtype="SOA"):
         return statuses.get(name, "ok")
 
     monkeypatch.setattr(preflight, "_status", fake_status)
