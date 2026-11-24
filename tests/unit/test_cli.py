@@ -33,8 +33,12 @@ def test_scan_dry_run_plans_domain_target():
     assert "shodan" not in result.stdout.split("Execution plan")[1]
 
 
-def test_scan_requires_authorisation_when_not_interactive(tmp_path):
-    result = runner.invoke(app, ["scan", "-t", "example.com", "-o", str(tmp_path)])
-    assert result.exit_code == 2
-    assert "--yes" in result.stderr
-    assert not any(tmp_path.iterdir())
+def test_scan_does_not_ask_for_permission(tmp_path):
+    """Feedback from the user: no permission question — the scan just starts."""
+    from footprintx.modules import MODULE_REGISTRY
+
+    result = runner.invoke(app, ["scan", "-t", "example.com", "-o", str(tmp_path),
+                                 "-x", ",".join(MODULE_REGISTRY)], input="")
+    assert result.exit_code == 0, result.output
+    assert "authoris" not in result.output.lower()
+    assert any((tmp_path / "example.com").iterdir())

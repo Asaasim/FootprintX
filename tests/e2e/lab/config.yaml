@@ -30,7 +30,6 @@ output:
   formats: [json, html, txt, csv]
 
 safety:
-  require_authorization: true
   respect_scope: true
   max_requests_per_second: 100
 

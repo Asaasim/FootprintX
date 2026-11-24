@@ -86,7 +86,9 @@ class OutputConfig(BaseModel):
 
 
 class SafetyConfig(BaseModel):
-    require_authorization: bool = True
+    #: No longer used — scans don't ask for confirmation. Kept so existing config
+    #: files that still contain it load without a warning.
+    require_authorization: bool = False
     respect_scope: bool = True
     max_requests_per_second: float = Field(default=50, gt=0)
     #: Actively scan hostnames that resolve to private/internal addresses (internal

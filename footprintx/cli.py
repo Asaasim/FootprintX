@@ -198,15 +198,6 @@ def guided(ctx: typer.Context) -> None:
                   "target's own servers.")
     passive = Prompt.ask("   [bold]Choose[/]", choices=["1", "2"], default="1") == "2"
 
-    console.print("\n[bold]3. Permission check[/]\n"
-                  "   Scanning systems without permission is illegal in most countries.")
-    if not Confirm.ask("   Do you have written permission to test these targets?",
-                       default=False):
-        console.print("\n[yellow]Scan cancelled. Only scan systems you are authorised to "
-                      "test.[/]")
-        _pause_if_launcher()
-        raise typer.Exit(1)
-
     console.print()
     context = _run_scan(settings, targets, settings.output.directory, set(), passive)
     report = context.reports_dir / "report.html" if context else None
@@ -273,7 +264,8 @@ def scan(
     ] = False,
     yes: Annotated[
         bool,
-        typer.Option("--yes", "-y", help="Confirm you are authorised to scan these targets."),
+        typer.Option("--yes", "-y", hidden=True,
+                     help="Accepted for compatibility; scans no longer ask for confirmation."),
     ] = False,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Show the execution plan without scanning.")
@@ -306,7 +298,6 @@ def scan(
         _print_plan(targets, Orchestrator(settings).plan(targets, excluded, passive), output_root)
         return
 
-    _confirm_authorisation(settings, yes)
     context = _run_scan(settings, targets, output_root, excluded, passive)
     if context is None:
         raise typer.Exit(1)
@@ -491,18 +482,6 @@ def _print_plan(targets: list[Target], plan: ExecutionPlan, output_dir: Path) ->
     for i, layer in enumerate(plan, start=1):
         console.print(f"  Stage {i}: " + ", ".join(m.name for m in layer))
     console.print("\nOutput directory: " + escape(str(output_dir)))
-
-
-def _confirm_authorisation(settings: Settings, yes: bool) -> None:
-    """Spec §13: active reconnaissance requires explicit authorisation."""
-    if yes or not settings.safety.require_authorization:
-        return
-    if not sys.stdin.isatty():
-        err_console.print("[red]Authorisation required:[/] re-run with --yes to confirm you "
-                          "are authorised to scan these targets.")
-        raise typer.Exit(2)
-    if not typer.confirm("Do you have written authorisation to scan these targets?"):
-        raise typer.Exit(1)
 
 
 # -- doctor / modules / history ----------------------------------------------------
