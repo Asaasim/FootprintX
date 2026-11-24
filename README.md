@@ -8,7 +8,7 @@ FootprintX is a cybersecurity reconnaissance tool for digital footprint discover
 
 ## New to this? Start here
 
-**[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install on Kali Linux or Ubuntu and run your first scan, step by step in plain language. In short:
+**[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install on Kali Linux, Ubuntu or Windows (WSL) and run your first scan, step by step in plain language. In short:
 
 ```bash
 git clone https://github.com/Asaasim/FootprintX.git && cd FootprintX
@@ -24,7 +24,7 @@ Give it a domain, URL, IP address, IP range or a file of targets. FootprintX wor
 | --- | --- | --- |
 | Subdomain discovery | Subfinder, Assetfinder, Findomain, Amass (optional), crt.sh | zone transfers |
 | Public intelligence (OSINT) | theHarvester, RDAP registration data | RDAP only |
-| DNS records + SPF / DMARC / CAA / zone-transfer / wildcard checks | — | native resolver |
+| DNS records + SPF / DMARC / CAA / zone-transfer / wildcard checks | — | native resolver; failed lookups are retried, and TXT/CAA/MX… lookups the network blocks go over HTTPS (Cloudflare, Google) unless `modules.dns.resolvers` is set |
 | IP mapping, live-host sweep of ranges, reverse DNS | Nmap | all addresses kept |
 | Website probing (status, title, server, redirects, TLS certificate) | httpx-toolkit | native prober |
 | Port & service scanning (top 1000 + risky services such as Redis, MongoDB, RDP) | Nmap, Naabu | — |
@@ -37,7 +37,7 @@ A failing or missing tool never stops the scan: its step is skipped or falls bac
 
 | Profile | How | Typical time per domain | What it does |
 | --- | --- | --- | --- |
-| **Quick** (default) | `--profile quick`, guided option 1 | 5–15 minutes | top 100 ports + risky services (Redis, databases, RDP…) on up to 50 hosts, a short built-in high-value wordlist (`.git`, `.env`, backups, admin panels…) on the 3 main websites, 3-minute source timeouts |
+| **Quick** (default) | `--profile quick`, guided option 1 | 5–15 minutes | top 100 ports + risky services (Redis, databases, RDP…) on up to 50 servers (names sharing a server are scanned once), a short built-in high-value wordlist (`.git`, `.env`, backups, admin panels…) on the 3 main websites, 3-minute source timeouts |
 | **Thorough** | `--profile thorough`, guided option 2 | 30–60+ minutes | the limits in `config.yaml`: top 1000 ports on up to 256 hosts, the full wordlist on up to 10 websites |
 | **Passive** | `--passive`, guided option 3 | 2–10 minutes | public sources only; never contacts the target's servers |
 
@@ -79,6 +79,15 @@ footprintx report                                # show the latest report in the
 Notes: Kali ships ProjectDiscovery's httpx as `httpx-toolkit` (`/usr/bin/httpx` is the Python library) — handled automatically. Ubuntu 22.04 and older ship Python 3.10, which is too old — use Docker there. Results default to `~/FootprintX-results`. Any other Linux or macOS: [scripts/install_tools.sh](scripts/install_tools.sh) (needs Go) plus `pipx install .`, or Docker.
 
 Update with `git pull && bash install.sh` in the project folder; uninstall with `pipx uninstall footprintx` (details in the guide).
+
+### Windows (WSL)
+
+The same `bash install.sh` inside Kali or Ubuntu on WSL — no Docker needed. FootprintX notices that it runs in WSL and:
+
+- puts **FootprintX** (starts a scan) and **FootprintX results** on the Windows desktop (`footprintx windows-shortcuts` recreates them);
+- copies each scan's reports (not `raw/` or the log) to `C:\Users\<you>\FootprintX-results` and shows Windows paths — the scan itself stays on the faster Linux disk; turn off with `output.windows_copy: false`;
+- keeps Windows awake while a scan runs (closing the laptop lid can still suspend it);
+- accepts Windows paths (`C:\...\targets.txt`) in guided mode, ignores Windows programs on `PATH`, and uses TCP connect scans on WSL 1, which has no raw sockets. WSL 2 is recommended.
 
 ## Configuration
 

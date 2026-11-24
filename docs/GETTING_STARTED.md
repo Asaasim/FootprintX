@@ -4,7 +4,7 @@ FootprintX looks at a company's websites and network from the outside and lists 
 
 > **Only scan things you have written permission to test.** Scanning other people's systems without permission is illegal in most countries.
 
-**You need:** a computer running **Kali Linux** or **Ubuntu 24.04 or newer** (Debian 12+ and Linux Mint 22+ work too), an internet connection, and your computer password.
+**You need:** a computer running **Kali Linux** or **Ubuntu 24.04 or newer** (Debian 12+ and Linux Mint 22+ work too) — **or a Windows 10/11 computer with Kali or Ubuntu inside it (WSL)**, see [Windows](#windows-kali-or-ubuntu-inside-windows-wsl) — an internet connection, and your computer password.
 
 **Tip — copying commands:** the grey boxes below contain commands. Select the text, copy it, then paste it into the Terminal with **Ctrl + Shift + V** (plain Ctrl + V does not work in the Terminal). Press **Enter** to run it.
 
@@ -30,6 +30,19 @@ When it's done you'll see **"FootprintX is installed."** above a checklist. Line
 
 **On Ubuntu**, the installer also prints lines such as `installed subfinder v2.17.0 (checksum verified)` — these tools aren't in Ubuntu's own app store, so it downloads them from their official websites. Everything works the same as on Kali, with two small differences: port scans are a little slower (Ubuntu doesn't allow the fast kind without `sudo`), and the optional Amass tool isn't installed. If the installer says **"FootprintX needs Python 3.11 or newer"**, your Ubuntu is too old (22.04 or earlier) — upgrade to 24.04, or ask a technical person to set it up with Docker (see the README).
 
+### Windows (Kali or Ubuntu inside Windows, "WSL")
+
+You do **not** need Docker. If you already have Kali or Ubuntu inside Windows, open it from the **Start menu** and paste the install block from step 2 above. (If you don't have it yet: open **PowerShell** as administrator, type `wsl --install -d kali-linux`, restart the computer, and open **Kali Linux** from the Start menu.)
+
+After the installation there are two new icons on your **Windows desktop**:
+
+- **FootprintX** — double-click it to start a scan.
+- **FootprintX results** — a folder with all your reports, in `C:\Users\<your name>\FootprintX-results`. Open `report.html` in your browser, `report.txt` in Notepad, or `findings.csv` in Excel, just like any other file.
+
+While a scan runs, FootprintX keeps Windows from going to sleep. Leave the window open and **don't close the laptop lid** — that pauses the scan until you open it again.
+
+Files you want to scan from (a list of targets) can stay in Windows: type or drag the path, e.g. `C:\Users\you\Desktop\targets.txt`.
+
 ### Alternative: download a ZIP
 
 If you prefer not to use `git`: go to <https://github.com/Asaasim/FootprintX>, click the green **Code** button, then **Download ZIP**. Firefox saves it in your **Downloads** folder. Then paste this into the Terminal:
@@ -51,7 +64,7 @@ bash install.sh
    footprintx
    ```
 
-   Or open the applications menu (on Ubuntu: the **Show Apps** grid at the bottom left), search for **FootprintX** and click it.
+   On Windows, double-click **FootprintX** on the desktop instead. On Kali or Ubuntu you can also open the applications menu (on Ubuntu: the **Show Apps** grid at the bottom left), search for **FootprintX** and click it.
 
 2. Answer the two questions:
 
@@ -110,6 +123,8 @@ Everything goes into the **FootprintX-results** folder in your home folder: one 
 | `reports/findings.csv` | Every finding as a spreadsheet (opens in LibreOffice Calc) |
 | `subdomains.txt`, `open_ports.json`, … | The raw lists, one file per kind of finding |
 
+On Windows (WSL), open **FootprintX results** on the desktop: it has the same folders.
+
 To list your previous scans and where their reports are:
 
 ```bash
@@ -154,6 +169,8 @@ Keep this file private — don't share it or put it online.
 | "Could not save the results" | The disk is full, or the results folder isn't yours (for example after running FootprintX with `sudo`). The message shows the command that fixes the folder. |
 | A step says *skipped* | Usually it doesn't apply to that target, or it needs the optional Shodan key. The reason is shown next to it. |
 | The scan takes too long | Use the quick scan (option `1`). The line at the bottom shows what's running and for how long. **Ctrl + C** stops it and keeps what was found. |
+| Windows: the desktop icons are missing | Open Kali/Ubuntu from the Start menu and type `footprintx windows-shortcuts`. |
+| Windows: a scan took hours | The computer probably went to sleep or the lid was closed, which pauses the scan. Update FootprintX (it keeps Windows awake) and leave the lid open. |
 | `git: command not found` during install | Install git first with `sudo apt install -y git`, then run the install block again. |
 | "This installer supports Kali Linux and Ubuntu/Debian" | Your system isn't one of those. FootprintX can still run with Docker — see the README. |
 | "could not install …" lines on Ubuntu | That one tool couldn't be downloaded (often a network hiccup). Run `bash install.sh` again later; FootprintX works without it meanwhile. |
@@ -174,7 +191,7 @@ bash install.sh
 
 ```bash
 pipx uninstall footprintx
-rm ~/.local/share/applications/footprintx.desktop
+rm -f ~/.local/share/applications/footprintx.desktop
 ```
 
 On Ubuntu also remove the downloaded tools:
@@ -184,4 +201,4 @@ pipx uninstall theHarvester
 rm -f ~/.local/bin/{subfinder,httpx-toolkit,naabu,findomain,assetfinder}
 ```
 
-This removes the program and its menu entry. Your results (`~/FootprintX-results`) and settings (`~/.config/footprintx`) stay until you delete those folders yourself.
+On Windows, also delete the two desktop icons. This removes the program and its menu entry. Your results (`~/FootprintX-results`) and settings (`~/.config/footprintx`) stay until you delete those folders yourself.
