@@ -18,7 +18,7 @@ from typing import ClassVar
 from footprintx.core.config import get_secret
 from footprintx.core.models import Finding, FindingKind
 from footprintx.core.process_manager import CommandResult, run_command
-from footprintx.utils.locations import user_home
+from footprintx.utils.locations import is_wsl, user_home
 from footprintx.utils.platform import detect_platform
 from footprintx.utils.validators import hostnames_in
 
@@ -37,6 +37,9 @@ def _search_dirs() -> list[str]:
     """``PATH``, plus ``~/.local/bin`` where install.sh puts tools on Ubuntu/Debian
     (it is only added to ``PATH`` at the next login)."""
     dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+    if is_wsl():
+        # WSL adds Windows' own PATH: very slow to search, and its programs aren't ours.
+        dirs = [d for d in dirs if not d.startswith("/mnt/")]
     local_bin = str(user_home() / ".local" / "bin")
     if local_bin not in dirs:
         dirs.append(local_bin)

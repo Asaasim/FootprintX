@@ -7,7 +7,8 @@ Three set-ups print paths that don't exist "on my laptop":
 * Docker — ``/app/results/...`` only exists inside the container. Results are
   shown as the ``results`` folder inside the FootprintX folder on the host.
 * WSL (Kali/Ubuntu inside Windows) — Windows programs can't open ``/home/...``;
-  we also show the ``\\\\wsl.localhost\\...`` path and open pages with Windows.
+  we show the copy in the Windows results folder (see :mod:`footprintx.utils.wsl`),
+  or failing that the ``\\\\wsl.localhost\\...`` path, and open pages with Windows.
 """
 
 from __future__ import annotations
@@ -82,6 +83,11 @@ def describe(path: Path) -> str:
     """The path(s) the user can actually open on their computer."""
     if (outside := host_path(path)) is not None:
         return outside
+    from footprintx.utils import wsl  # imports this module
+
+    copy = wsl.copied(path)
+    if copy is not None and (win := windows_path(copy)) is not None:
+        return win
     if (win := windows_path(path)) is not None:
         return f"{path}\n      in Windows: {win}"
     return str(path)
@@ -91,7 +97,9 @@ def can_open_page() -> bool:
     if in_docker():
         return False
     if is_wsl():
-        return shutil.which("explorer.exe") is not None or shutil.which("wslview") is not None
+        from footprintx.utils import wsl
+
+        return wsl.can_open()
     has_desktop = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
     return has_desktop or os.name != "posix"
 
@@ -99,11 +107,7 @@ def can_open_page() -> bool:
 def open_page(path: Path) -> bool:
     """Open a local HTML file in the user's browser."""
     if is_wsl():
-        win = windows_path(path)
-        for cmd in (["wslview", str(path)], ["explorer.exe", win] if win else None):
-            if cmd and shutil.which(cmd[0]):
-                # explorer.exe returns 1 even on success, so don't check the exit code
-                subprocess.run(cmd, capture_output=True, timeout=30, check=False)
-                return True
-        return False
+        from footprintx.utils import wsl
+
+        return wsl.open_in_windows(path)
     return webbrowser.open(path.resolve().as_uri())

@@ -76,6 +76,8 @@ REPORT_FORMATS = ("json", "html", "txt", "csv", "xml")
 class OutputConfig(BaseModel):
     directory: Path = DEFAULT_RESULTS_DIR
     formats: list[str] = Field(default_factory=lambda: ["json", "html", "txt", "csv"])
+    #: Inside WSL: also copy the reports to C:\Users\<name>\FootprintX-results.
+    windows_copy: bool = True
 
     @field_validator("directory")
     @classmethod

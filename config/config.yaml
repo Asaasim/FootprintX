@@ -76,6 +76,7 @@ tools:
 output:
   directory: ./results
   formats: [json, html, txt, csv]   # also available: xml
+  windows_copy: true     # inside WSL: also copy reports to C:\Users\<you>\FootprintX-results
 
 safety:
   respect_scope: true

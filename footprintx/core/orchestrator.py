@@ -20,6 +20,7 @@ from footprintx.database.storage import HISTORY_DB, Storage
 from footprintx.modules import MODULE_REGISTRY
 from footprintx.modules.base import BaseModule
 from footprintx.reporting.pipeline import generate_reports
+from footprintx.utils import wsl
 from footprintx.utils.helpers import restore_ownership, safe_dirname, unique_session_dir, utc_now
 from footprintx.utils.sanitize import redact
 
@@ -125,6 +126,8 @@ class Orchestrator:
             detach_log_file(log_handler)
             restore_ownership(output_dir, parents=(output_dir.parent, output_root,
                                                    output_root / HISTORY_DB))
+            if self.settings.output.windows_copy:
+                wsl.copy_scan(output_dir)  # only does something inside WSL
         return context
 
     @staticmethod

@@ -49,6 +49,7 @@ from footprintx.database.storage import HISTORY_DB, Storage
 from footprintx.modules import MODULE_REGISTRY, module_config_warnings
 from footprintx.reporting.correlator import correlate, count_hosts
 from footprintx.reporting.text_report import render_text_report
+from footprintx.utils import wsl
 from footprintx.utils.dependency_checker import run_doctor
 from footprintx.utils.locations import can_open_page, describe, open_page
 from footprintx.utils.sanitize import redact
@@ -166,6 +167,15 @@ def _parse_exclude(value: str | None) -> set[str]:
 
 def guided(ctx: typer.Context) -> None:
     """Question-and-answer scan for non-technical users."""
+    try:
+        _guided(ctx)
+    except BaseException:
+        _pause_if_launcher()  # or the message would vanish with the window
+        raise
+    _pause_if_launcher()
+
+
+def _guided(ctx: typer.Context) -> None:
     settings = _settings(ctx)
     setup_logging("ERROR")
     console.print(Panel.fit(
@@ -185,7 +195,7 @@ def guided(ctx: typer.Context) -> None:
         answer = Prompt.ask("   [bold]Target[/]").strip().strip('"').strip("'")
         if not answer:
             continue
-        file = Path(answer).expanduser()
+        file = wsl.linux_path(answer)
         raw = TargetParser.read_file(file) if file.is_file() else re.split(r"[,\s]+", answer)
         targets, invalid = parser.parse_many(raw)
         for value, reason in invalid:
@@ -221,7 +231,6 @@ def guided(ctx: typer.Context) -> None:
                         default=False) and not open_page(report):
         console.print("[yellow]Could not open a browser — the report is shown above and "
                       "saved in report.txt.[/]")
-    _pause_if_launcher()
 
 
 def _pause_if_launcher() -> None:
@@ -378,14 +387,17 @@ def _run_scan(settings: Settings, targets: list[Target], output_root: Path,
 
     progress = _Progress()
     try:
-        with console.status("Starting…", spinner="dots") as status:
+        with console.status("Starting…", spinner="dots") as status, wsl.keep_awake():
             progress.status = status
             context = asyncio.run(orchestrator.run(
                 targets, scope, output_root, exclude=excluded, passive=passive,
                 profile=profile, on_result=progress.finished, on_start=progress.started))
     except KeyboardInterrupt:
+        scans = sorted(output_root.expanduser().glob("*/scan_*"),
+                       key=lambda p: p.stat().st_mtime)
         err_console.print("\n[yellow]Scan stopped — partial results and reports were saved "
-                          "under " + escape(describe(output_root)) + ".[/]\n"
+                          "in " + escape(describe(scans[-1] if scans else output_root))
+                          + ".[/]\n"
                           "Read the report with:  footprintx report")
         raise typer.Exit(130) from None
     except OSError as exc:  # results folder not writable, disk full, …
@@ -527,7 +539,7 @@ def _print_summary(context: ScanContext) -> None:
             table.add_row(Text(sev.upper(), style=SEVERITY_STYLE.get(sev, "")), Text(f.value),
                           Text(f.target or ""))
         console.print(table)
-    _print_saved_files(context.output_dir)
+    _print_saved_files(context.output_dir, context.settings)
 
 
 def _show_report(scan_dir: Path, full: bool = False) -> bool:
@@ -547,8 +559,10 @@ def _show_report(scan_dir: Path, full: bool = False) -> bool:
     return True
 
 
-def _print_saved_files(scan_dir: Path) -> None:
+def _print_saved_files(scan_dir: Path, settings: Settings) -> None:
     reports = scan_dir / "reports"
+    if settings.output.windows_copy and wsl.copied(scan_dir) is None:
+        wsl.copy_scan(scan_dir)  # e.g. a scan from before this feature
     files = [("Report (text)", reports / "report.txt"),
              ("Report (web page)", reports / "report.html"),
              ("Spreadsheet", reports / "findings.csv")]
@@ -660,6 +674,20 @@ def history(
         console.print(Text(f"  {i:>2}  {report}", overflow="fold"))
 
 
+@app.command("windows-shortcuts", hidden=not wsl.active())
+def windows_shortcuts() -> None:
+    """WSL only: put FootprintX and its results folder on the Windows desktop."""
+    if not wsl.active():
+        err_console.print("This only works inside WSL (Linux running inside Windows).")
+        raise typer.Exit(1)
+    if not wsl.create_shortcuts():
+        err_console.print("[yellow]Could not create the desktop shortcuts — start FootprintX "
+                          "by typing footprintx in the terminal instead.[/]")
+        raise typer.Exit(1)
+    console.print("Two icons are now on your Windows desktop:  [cyan]FootprintX[/]  and  "
+                  "[cyan]FootprintX results[/]")
+
+
 @app.command()
 def report(
     ctx: typer.Context,
@@ -680,7 +708,7 @@ def report(
         raise typer.Exit(1)
     if not _show_report(scan_dir, full=full):
         raise typer.Exit(1)
-    _print_saved_files(scan_dir)
+    _print_saved_files(scan_dir, settings)
 
 
 def _find_scan_dir(settings: Settings, which: str) -> Path | None:
