@@ -39,11 +39,19 @@ else
   warn "On other systems use Docker, or see scripts/install_tools.sh (README.md explains both)."
   exit 1
 fi
-if [ "$(id -u)" -eq 0 ]; then
+WSL=0
+if grep -qi microsoft /proc/version 2>/dev/null && [ ! -e /.dockerenv ]; then WSL=1; fi
+# WSL sometimes has no ordinary user at all (root is the login): that's fine there.
+if [ "$(id -u)" -eq 0 ] && { [ "$WSL" = 0 ] || [ -n "${SUDO_USER:-}" ]; }; then
   warn "Run this as your normal user (not with sudo) — it will ask for your password itself."
   exit 1
 fi
-echo "Installing FootprintX on $OS_NAME"
+if [ "$(id -u)" -eq 0 ] && ! command -v sudo >/dev/null 2>&1; then sudo() { "$@"; }; fi
+if [ "$WSL" = 1 ]; then
+  echo "Installing FootprintX on $OS_NAME inside Windows (WSL)"
+else
+  echo "Installing FootprintX on $OS_NAME"
+fi
 
 # --- 1. tools -----------------------------------------------------------------------
 if [ "$FLAVOUR" = kali ]; then
@@ -81,7 +89,12 @@ else
 
   if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
     warn "FootprintX needs Python 3.11 or newer; this system has $(python3 -V 2>&1)."
-    warn "Use Ubuntu 24.04 / Debian 12 or newer, or run FootprintX with Docker (see README.md)."
+    if [ "$WSL" = 1 ]; then
+      warn "Get a newer one: open PowerShell in Windows, run   wsl --install -d Ubuntu-24.04"
+      warn "then open \"Ubuntu 24.04\" from the Start menu and install FootprintX there."
+    else
+      warn "Use Ubuntu 24.04 / Debian 12 or newer, or run FootprintX with Docker (see README.md)."
+    fi
     exit 1
   fi
 
@@ -159,6 +172,10 @@ if [ ! -s "$CONFIG_DIR/wordlists/common.txt" ]; then
 fi
 
 # --- 4. menu entry ------------------------------------------------------------------
+if [ "$WSL" = 1 ]; then
+say "Step 4/5: adding FootprintX to your Windows desktop"
+"$FPX" windows-shortcuts || true
+else
 say "Step 4/5: adding FootprintX to the applications menu"
 mkdir -p "$HOME/.local/share/applications"
 # PATH is spelled out so tools in ~/.local/bin are found even before the next login.
@@ -173,18 +190,27 @@ Icon=utilities-terminal
 Categories=Security;Network;
 EOF
 echo "    look for \"FootprintX\" in the applications menu"
+fi
 
 # --- 5. check -----------------------------------------------------------------------
 say "Step 5/5: checking the installation"
 PATH="$BIN_DIR:$PATH" "$FPX" doctor || true
 
+if [ "$WSL" = 1 ]; then
+  HOW='double-click "FootprintX" on your Windows desktop
+              (or open a NEW terminal and type   footprintx)'
+  WHERE='double-click "FootprintX results" on your Windows desktop'
+else
+  HOW='open a NEW terminal and type   footprintx
+              (or pick "FootprintX" in the applications menu)'
+  WHERE="$RESULTS_DIR"
+fi
 cat <<EOF
 
 $(printf '\033[1;32m')FootprintX is installed.$(printf '\033[0m')
 
-  Start it:   open a NEW terminal and type   footprintx
-              (or pick "FootprintX" in the applications menu)
-  Results:    $RESULTS_DIR
+  Start it:   $HOW
+  Results:    $WHERE
   Settings:   $CONFIG_DIR/config.yaml
   API keys:   $CONFIG_DIR/.env
 
